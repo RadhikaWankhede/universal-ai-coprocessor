@@ -5,13 +5,14 @@ Nothing in this module can reach a plugin except through `decide` first.
 """
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from uaic.broker import CapabilitySet, Registry, decide, default_registry
-from uaic.contracts import Decision, ToolCall, ToolResult, Verdict
-from uaic.journal import ActionJournal, Status
+from uaic.contracts import Decision, Rev, Risk, ToolCall, ToolResult, Verdict
+from uaic.journal import ActionJournal, JournalError, Status
 
 # Asks the user. Returns True to proceed. A plan-level confirmation is asked
 # once for the whole plan; a step-level one is asked for every call.
@@ -23,6 +24,15 @@ PluginExecute = Callable[[ToolCall], ToolResult]
 def deny_everything(call: ToolCall, verdict: Verdict) -> bool:
     """Default confirmer: refuse anything needing a human. Safe for tests."""
     return False
+
+
+def _not_journalled(reason: str) -> Verdict:
+    """Nothing reaches the machine without an audit entry. If the journal will
+    not accept the record, the action does not happen."""
+    return Verdict(decision=Decision.DENY, risk=Risk.CRITICAL,
+                   rev=Rev.IRREVERSIBLE,
+                   reasons=(f"refused: could not be journalled ({reason})",),
+                   rule_ids=("RT.NOT_JOURNALLED",))
 
 
 @dataclass
@@ -96,6 +106,12 @@ class Executor:
 
     # --------------------------------------------------------------- internals
 
+    def _record_refusal(self, call: ToolCall, verdict: Verdict, *,
+                        declined: bool = False) -> None:
+        """Nothing ran, so failing to record the refusal must not crash the run."""
+        with contextlib.suppress(JournalError):
+            self._journal.write_refusal(call, verdict, declined_by_user=declined)
+
     def _run_one(self, call: ToolCall, caps: CapabilitySet,
                  plan_confirmed: bool) -> tuple[StepOutcome, bool, int]:
         verdict = decide(call, caps, registry=self._registry,
@@ -103,13 +119,13 @@ class Executor:
         asked = 0
 
         if verdict.decision is Decision.DENY:
-            self._journal.write_refusal(call, verdict)
+            self._record_refusal(call, verdict)
             return StepOutcome(call, verdict, status=Status.DENIED), plan_confirmed, asked
 
         if verdict.decision is Decision.CONFIRM_PLAN and not plan_confirmed:
             asked = 1
             if not self._confirm(call, verdict):
-                self._journal.write_refusal(call, verdict, declined_by_user=True)
+                self._record_refusal(call, verdict, declined=True)
                 return (StepOutcome(call, verdict, status=Status.DECLINED),
                         plan_confirmed, asked)
             plan_confirmed = True
@@ -117,7 +133,7 @@ class Executor:
         elif verdict.decision is Decision.CONFIRM_STEP:
             asked = 1
             if not self._confirm(call, verdict):
-                self._journal.write_refusal(call, verdict, declined_by_user=True)
+                self._record_refusal(call, verdict, declined=True)
                 return (StepOutcome(call, verdict, status=Status.DECLINED),
                         plan_confirmed, asked)
 
@@ -126,14 +142,23 @@ class Executor:
         run = self._plugins.get(plugin_name)
         if run is None:
             # Declared in a manifest but no plugin loaded: refuse, do not guess.
-            self._journal.write_refusal(call, verdict)
+            self._record_refusal(call, verdict)
             return (StepOutcome(call, verdict, status=Status.DENIED),
                     plan_confirmed, asked)
 
-        # intent is committed BEFORE dispatch, so a crash leaves evidence
-        self._journal.write_intent(call, verdict, mutates=spec.mutates)
+        # intent is committed BEFORE dispatch, so a crash leaves evidence.
+        # If it cannot be committed, the call is refused rather than run blind.
+        try:
+            self._journal.write_intent(call, verdict, mutates=spec.mutates)
+        except JournalError as exc:
+            refused = _not_journalled(str(exc))
+            return (StepOutcome(call, refused, status=Status.DENIED),
+                    plan_confirmed, asked)
+
         result = run(call)
-        self._journal.write_outcome(result)
+        # the intent row survives regardless; an unrecorded outcome is not fatal
+        with contextlib.suppress(JournalError):
+            self._journal.write_outcome(result)
 
         return (StepOutcome(call, verdict, result=result,
                             status=Status.EXECUTED if result.ok else Status.FAILED),

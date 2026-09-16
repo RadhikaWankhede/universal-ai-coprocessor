@@ -203,3 +203,34 @@ def test_organise_then_undo_restores_everything(journal, plugin, sandbox):
     assert (dl / "two.txt").read_text() == "2"
     assert (dl / "a.pdf").read_text() == "a", "the trashed file came back"
     assert list(target.iterdir()) == []
+
+
+# ---------- nothing runs that cannot be journalled ----------
+
+def test_a_call_that_cannot_be_journalled_is_never_dispatched(journal, sandbox):
+    """If the audit trail refuses the record, the action does not happen."""
+    touched: list[str] = []
+
+    def spy(c: ToolCall) -> ToolResult:
+        touched.append(c.call_id)
+        return ToolResult(call_id=c.call_id, ok=True)
+
+    ex = Executor(journal, {"fs": spy})
+    first = call(1, "fs.list", path=str(sandbox["downloads"]))
+    ex.run_one(first, caps_for(sandbox, "fs.list"))
+    assert touched == ["c1"]
+
+    # the same call_id again: the journal's primary key refuses it
+    again = ex.run_one(first, caps_for(sandbox, "fs.list"))
+    assert again.status == Status.DENIED
+    assert again.verdict.rule_ids == ("RT.NOT_JOURNALLED",)
+    assert touched == ["c1"], "the plugin must not have been called a second time"
+
+
+def test_a_duplicate_call_does_not_crash_the_plan(journal, plugin, sandbox):
+    ex = Executor(journal, {"fs": plugin.execute})
+    dup = call(1, "fs.list", path=str(sandbox["downloads"]))
+    report = ex.run_plan([dup, dup, call(2, "fs.list", path=str(sandbox["downloads"]))],
+                         caps_for(sandbox, "fs.list"))
+    assert [s.status for s in report.steps] == [
+        Status.EXECUTED, Status.DENIED, Status.EXECUTED]

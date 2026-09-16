@@ -5,6 +5,7 @@ from uaic.runtime.executor import (
     StepOutcome,
     deny_everything,
 )
+from uaic.runtime.freeze import escalation_needed, freeze_plan
 
 __all__ = [
     "Confirmer",
@@ -12,4 +13,6 @@ __all__ = [
     "PlanReport",
     "StepOutcome",
     "deny_everything",
+    "escalation_needed",
+    "freeze_plan",
 ]

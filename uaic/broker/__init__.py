@@ -10,6 +10,7 @@ from uaic.broker.manifest import (
 )
 from uaic.broker.pipeline import GATE, decide
 from uaic.broker.risk import classify, known_predicates, predicate, worse
+from uaic.broker.schemas import tool_schema, tool_schemas
 
 __all__ = [
     "GATE",
@@ -27,5 +28,7 @@ __all__ = [
     "load_registry",
     "predicate",
     "resolve",
+    "tool_schema",
+    "tool_schemas",
     "worse",
 ]
