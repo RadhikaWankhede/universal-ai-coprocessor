@@ -1,0 +1,68 @@
+plugin: fs
+version: 1
+tools:
+  - name: fs.list
+    summary: List the entries in a folder
+    args:
+      path: {type: path}
+    scope_args: [path]
+    risk: low
+    rev: reversible
+
+  - name: fs.read
+    summary: Read the contents of a file
+    args:
+      path: {type: path}
+    scope_args: [path]
+    risk: low
+    rev: reversible
+
+  - name: fs.copy
+    summary: Copy a file
+    args:
+      src: {type: path}
+      dst: {type: path}
+    scope_args: [src, dst]
+    risk: low
+    rev: reversible
+    inverse: fs.delete
+
+  - name: fs.move
+    summary: Move or rename a file
+    args:
+      src: {type: path}
+      dst: {type: path}
+    scope_args: [src, dst]
+    risk: low
+    rev: reversible
+    inverse: fs.move
+    escalate: [target_is_directory]
+
+  - name: fs.delete
+    summary: Delete a file by moving it to the session trash
+    args:
+      path: {type: path}
+      recursive: {type: bool, required: false, default: false}
+    scope_args: [path]
+    risk: medium
+    rev: reversible          # reversible ONLY because it is trash-backed
+    inverse: fs.restore
+    escalate: [target_is_directory]
+
+  - name: fs.restore
+    summary: Restore a file from the session trash
+    args:
+      trash_id: {type: str}
+      dst: {type: path}
+    scope_args: [dst]
+    risk: low
+    rev: reversible
+
+  - name: fs.overwrite
+    summary: Replace the contents of an existing file
+    args:
+      path: {type: path}
+      content: {type: str}
+    scope_args: [path]
+    risk: high
+    rev: irreversible

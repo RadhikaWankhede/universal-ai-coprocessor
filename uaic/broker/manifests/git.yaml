@@ -1,0 +1,39 @@
+plugin: git
+version: 1
+tools:
+  - name: git.status
+    summary: Show the working tree status
+    args:
+      repo: {type: path}
+    scope_args: [repo]
+    risk: low
+    rev: reversible
+
+  - name: git.commit
+    summary: Commit staged changes
+    args:
+      repo: {type: path}
+      message: {type: str}
+    scope_args: [repo]
+    risk: low
+    rev: compensable
+    inverse: git.revert
+
+  - name: git.branch
+    summary: Create a branch
+    args:
+      repo: {type: path}
+      name: {type: str}
+    scope_args: [repo]
+    risk: low
+    rev: compensable
+    inverse: git.branch_delete
+
+  - name: git.push_force
+    summary: Force-push, overwriting remote history
+    args:
+      repo: {type: path}
+      remote: {type: str}
+    scope_args: [repo]
+    risk: critical
+    rev: irreversible

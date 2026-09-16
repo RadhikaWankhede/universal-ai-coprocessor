@@ -1,0 +1,12 @@
+plugin: mail
+version: 1
+tools:
+  - name: mail.send
+    summary: Send an email (ALWAYS stubbed to a local file in this project)
+    args:
+      to: {type: email}
+      subject: {type: str, required: false, default: ""}
+      body: {type: str}
+    scope_args: []
+    risk: high
+    rev: irreversible

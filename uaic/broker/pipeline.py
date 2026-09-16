@@ -1,17 +1,20 @@
 """The Capability Broker: the only path from a proposed call to the machine.
 
-Stages 1-5 are pure functions. No network, no model, no side effects -
-which is why the whole decision layer is testable from a table of cases.
+    validate -> normalise -> scope -> classify -> gate
+
+Stages 1-4 are pure functions: no network, no model, no side effects. That is
+why the entire decision layer is testable from a table of cases.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 from uaic.broker.capability import CapabilitySet, resolve
-from uaic.broker.risk import TOOL_SPECS, classify
+from uaic.broker.manifest import Registry, ToolSpec, default_registry
+from uaic.broker.risk import classify
 from uaic.contracts import Decision, Rev, Risk, ToolCall, Verdict
 
-# (reversibility, risk) -> decision.  Policy as data, not as branching logic.
+# (reversibility, risk) -> decision.  Policy as data, never as branching logic.
 GATE: dict[tuple[Rev, Risk], Decision] = {
     (Rev.REVERSIBLE,   Risk.LOW):      Decision.ALLOW,
     (Rev.REVERSIBLE,   Risk.MEDIUM):   Decision.ALLOW,
@@ -29,53 +32,57 @@ GATE: dict[tuple[Rev, Risk], Decision] = {
 
 
 def _deny(rule_id: str, reason: str) -> Verdict:
-    # Conservative defaults: an unclassifiable call is treated as the worst case.
-    return Verdict(
-        decision=Decision.DENY,
-        risk=Risk.HIGH,
-        rev=Rev.IRREVERSIBLE,
-        reasons=(reason,),
-        rule_ids=(rule_id,),
-    )
+    # An unclassifiable call is treated as the worst case, never the best.
+    return Verdict(decision=Decision.DENY, risk=Risk.CRITICAL,
+                   rev=Rev.IRREVERSIBLE, reasons=(reason,), rule_ids=(rule_id,))
 
 
-def decide(call: ToolCall, caps: CapabilitySet,
+def decide(call: ToolCall, caps: CapabilitySet, *,
+           registry: Registry | None = None,
            session_root: Path | None = None) -> Verdict:
-    # 1. is the tool declared at all?
-    spec = TOOL_SPECS.get(call.tool)
+    reg = registry or default_registry()
+
+    # 1. declared?
+    spec: ToolSpec | None = reg.lookup(call.tool)
     if spec is None:
         return _deny("BRK.UNDECLARED_TOOL", f"{call.tool!r} is not a declared tool")
 
-    _, _, scope_args = spec
-
-    # 2. are the arguments we need actually present?
-    missing = [a for a in scope_args if a not in call.args]
+    # 2. arguments valid against the manifest?
+    missing = [a for a in spec.required_args() if a not in call.args]
     if missing:
-        return _deny("BRK.BAD_ARGS", f"missing argument(s): {', '.join(missing)}")
+        return _deny("BRK.BAD_ARGS", f"missing argument(s): {', '.join(sorted(missing))}")
+    unexpected = [a for a in call.args if a not in spec.args]
+    if unexpected:
+        return _deny("BRK.BAD_ARGS",
+                     f"undeclared argument(s): {', '.join(sorted(unexpected))}")
 
-    # 3. normalise every target to its real canonical path
+    # 3. normalise every scoped target to its real canonical path
     targets: list[Path] = []
-    for a in scope_args:
-        t = resolve(call.args[a], session_root)
+    for a in spec.scope_args:
+        t = resolve(call.args.get(a), session_root)
         if t is None:
-            return _deny("BRK.UNRESOLVABLE", f"could not resolve {a}={call.args[a]!r}")
+            return _deny("BRK.UNRESOLVABLE",
+                         f"could not resolve {a}={call.args.get(a)!r}")
         targets.append(t)
 
-    # 4. is this inside the capability set the user froze at approval?
+    # 4. inside the capability set frozen at approval?
     if not caps.permits_tool(call.tool):
         return _deny("BRK.OUTSIDE_FROZEN_CAPABILITY",
                      f"{call.tool} was not part of the approved plan")
-    for a, t in zip(scope_args, targets):
+    if call.seq >= caps.max_steps:
+        return _deny("BRK.STEP_BUDGET_EXCEEDED",
+                     f"step {call.seq} exceeds the plan budget of {caps.max_steps}")
+    for a, t in zip(spec.scope_args, targets, strict=True):
         if not caps.covers_path(t):
-            return _deny("BRK.OUT_OF_SCOPE", f"{a} resolves outside the granted folders: {t}")
+            return _deny("BRK.OUT_OF_SCOPE",
+                         f"{a} resolves outside the granted folders: {t}")
 
     # 5. how bad is it if this is wrong?
-    risk, rev = classify(call.tool, call.args, tuple(targets))
+    risk, rev = classify(spec, call.args, tuple(targets))
 
-    # 6. map (reversibility, risk) to a decision
-    decision = GATE[(rev, risk)]
+    # 6. policy lookup
     return Verdict(
-        decision=decision,
+        decision=GATE[(rev, risk)],
         risk=risk,
         rev=rev,
         reasons=(f"{call.tool} classified {rev.value}/{risk.value}",),

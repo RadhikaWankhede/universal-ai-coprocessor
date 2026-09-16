@@ -80,6 +80,11 @@ without a language model.
 
 ## Status
 
-Phase 1 complete: contracts, broker core, fs.list plugin, end-to-end spike,
-43 tests. Next: finish the broker (manifest loader from YAML, confirmation
-gate wiring), then the Action Journal and Undo Engine.
+Phase 1 complete. Broker core complete: YAML manifests with startup
+validation, canonical path resolution hardened against traversal, symlinks,
+junctions, NUL bytes and Windows short names, four risk levels with
+registered escalation predicates, the GATE policy table, and a step budget.
+73 tests, ruff clean.
+
+Next: the confirmation gate needs wiring to a real user prompt, then the
+Action Journal (SQLite, WAL, append-only trigger) and the Undo Engine.

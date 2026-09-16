@@ -15,8 +15,11 @@ def resolve(raw: object, session_root: Path | None = None) -> Path | None:
     """
     if not isinstance(raw, (str, Path)) or str(raw).strip() == "":
         return None
+    text = str(raw)
+    if "\x00" in text:
+        return None
     try:
-        p = Path(os.path.expandvars(os.path.expanduser(str(raw))))
+        p = Path(os.path.expandvars(os.path.expanduser(text)))
     except (TypeError, ValueError):
         return None
 
@@ -27,7 +30,9 @@ def resolve(raw: object, session_root: Path | None = None) -> Path | None:
 
     try:
         p = p.resolve(strict=False)
-    except (OSError, RuntimeError):
+    except (OSError, RuntimeError, ValueError):
+        # ValueError covers embedded NUL bytes; OSError covers unreadable or
+        # too-deeply-nested paths; RuntimeError covers symlink loops.
         return None
 
     # Windows alternate data streams: C:\file.txt:hidden

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -84,3 +85,90 @@ def test_capability_set_is_frozen(caps):
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         caps.plan_id = "other"
+
+
+# ---------- Windows-specific escapes ----------
+
+def test_directory_junction_out_of_grant_is_blocked(sandbox):
+    """Junctions need no admin rights, unlike symlinks - so this runs everywhere
+    on Windows and covers the same escape the symlink test cannot."""
+    if os.name != "nt":
+        pytest.skip("Windows-only: directory junctions")
+    link = sandbox["downloads"] / "escape"
+    proc = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(sandbox["documents"])],
+        capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        pytest.skip(f"could not create junction: {proc.stderr.strip()}")
+    t = resolve(link / "secret.docx")
+    assert t is not None
+    assert not is_inside(t, sandbox["downloads"]), (
+        "a junction inside the grant must not be a way out of it")
+
+
+def test_mixed_separators_still_resolve(sandbox):
+    if os.name != "nt":
+        pytest.skip("Windows-only: backslash and forward slash are both separators")
+    sneaky = f"{sandbox['downloads']}/../Documents\\secret.docx"
+    assert not is_inside(resolve(sneaky), sandbox["downloads"])
+
+
+def test_short_name_form_is_handled(sandbox):
+    """8.3 short names such as PROGRA~1 must resolve to the long form."""
+    if os.name != "nt":
+        pytest.skip("Windows-only: 8.3 short names")
+    long_dir = sandbox["downloads"] / "a folder with spaces"
+    long_dir.mkdir()
+    (long_dir / "f.txt").write_text("x")
+    t = resolve(long_dir / "f.txt")
+    assert is_inside(t, sandbox["downloads"])
+
+
+# ---------- more containment edge cases ----------
+
+def test_the_grant_root_itself_is_inside(sandbox):
+    """Listing the granted folder must be permitted - the spike depends on it."""
+    assert is_inside(resolve(sandbox["downloads"]), sandbox["downloads"])
+
+
+def test_redundant_separators_and_dots_are_normalised(sandbox):
+    messy = Path(str(sandbox["downloads"])) / "." / "sub" / "." / "b.pdf"
+    assert is_inside(resolve(messy), sandbox["downloads"])
+
+
+def test_excess_parent_segments_do_not_wrap_around(sandbox):
+    sneaky = sandbox["downloads"]
+    for _ in range(40):
+        sneaky = sneaky / ".."
+    sneaky = sneaky / "etc" / "passwd"
+    assert not is_inside(resolve(sneaky), sandbox["downloads"])
+
+
+def test_file_merely_starting_with_the_grant_name_is_outside(sandbox):
+    """Downloads.bak is not inside Downloads."""
+    impostor = sandbox["root"] / "Downloads.bak"
+    impostor.mkdir()
+    (impostor / "x.pdf").write_text("x")
+    assert not is_inside(resolve(impostor / "x.pdf"), sandbox["downloads"])
+
+
+def test_nul_byte_is_refused(sandbox):
+    assert resolve(str(sandbox["downloads"]) + "\x00evil") is None
+
+
+def test_multiple_grants_are_all_considered(sandbox):
+    from uaic.broker import CapabilitySet
+    caps = CapabilitySet(
+        plan_id="p1", tools=frozenset({"fs.read"}),
+        path_grants=(sandbox["downloads"], sandbox["documents"]),
+    )
+    assert caps.covers_path(resolve(sandbox["downloads"] / "a.pdf"))
+    assert caps.covers_path(resolve(sandbox["documents"] / "secret.docx"))
+    assert not caps.covers_path(resolve(sandbox["downloads2"] / "other.pdf"))
+
+
+def test_no_grants_means_nothing_is_covered(sandbox):
+    from uaic.broker import CapabilitySet
+    caps = CapabilitySet(plan_id="p1", tools=frozenset({"fs.read"}), path_grants=())
+    assert not caps.covers_path(resolve(sandbox["downloads"] / "a.pdf"))
