@@ -42,6 +42,7 @@ class ToolSpec(BaseModel):
     rev: Rev
     escalate: tuple[str, ...] = ()
     inverse: str | None = None
+    mutates: bool = True      # read-only tools change nothing, so undo skips them
 
     @field_validator("name")
     @classmethod

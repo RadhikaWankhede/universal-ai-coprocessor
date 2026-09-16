@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.db
+.uaic/
 *.sqlite3
 .env
 .DS_Store

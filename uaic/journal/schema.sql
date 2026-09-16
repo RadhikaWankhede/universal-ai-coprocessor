@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS journal (
     decision     TEXT    NOT NULL,
     risk         TEXT    NOT NULL,
     rev          TEXT    NOT NULL,
-    status       TEXT    NOT NULL,            -- intended|executed|failed|undone
+    status       TEXT    NOT NULL,            -- intended|executed|failed|undone|denied|declined
+    mutates      INTEGER NOT NULL DEFAULT 1,
     inverse_json TEXT,
     result_hash  TEXT,
     provenance   TEXT    NOT NULL DEFAULT 'untrusted',
@@ -38,6 +39,7 @@ BEGIN
        OR NEW.risk      IS NOT OLD.risk
        OR NEW.rev       IS NOT OLD.rev
        OR NEW.ts_intent IS NOT OLD.ts_intent
+       OR NEW.mutates   IS NOT OLD.mutates
        OR OLD.status NOT IN ('intended', 'executed');
 END;
 

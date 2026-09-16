@@ -27,10 +27,12 @@ class JournalError(Exception):
 
 
 class Status:
-    INTENDED = "intended"
+    INTENDED = "intended"      # written before dispatch; still open
     EXECUTED = "executed"
     FAILED = "failed"
     UNDONE = "undone"
+    DENIED = "denied"          # the broker refused it; never dispatched
+    DECLINED = "declined"      # the user refused it at a confirmation gate
 
 
 class JournalRow(BaseModel):
@@ -45,6 +47,7 @@ class JournalRow(BaseModel):
     risk: Risk
     rev: Rev
     status: str
+    mutates: bool = True
     inverse: ToolCall | None = None
     result_hash: str | None = None
     provenance: Provenance = Provenance.UNTRUSTED
@@ -68,17 +71,31 @@ class ActionJournal:
 
     # ---------------------------------------------------------------- writes
 
-    def write_intent(self, call: ToolCall, verdict: Verdict) -> None:
+    def write_intent(self, call: ToolCall, verdict: Verdict, *,
+                     mutates: bool = True) -> None:
         """Record the intent and COMMIT, before the plugin is invoked."""
+        self._insert(call, verdict, Status.INTENDED, mutates=mutates)
+
+    def write_refusal(self, call: ToolCall, verdict: Verdict, *,
+                      declined_by_user: bool = False) -> None:
+        """Record a call that was never dispatched. The evaluation harness
+        counts these, so refusals must be in the audit trail too."""
+        self._insert(call, verdict,
+                     Status.DECLINED if declined_by_user else Status.DENIED,
+                     mutates=False, closed=True)
+
+    def _insert(self, call: ToolCall, verdict: Verdict, status: str, *,
+                mutates: bool, closed: bool = False) -> None:
         try:
             self._conn.execute(
-                "INSERT INTO journal (call_id, plan_id, seq, ts_intent, tool, "
-                "args_json, decision, risk, rev, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (call.call_id, call.plan_id, call.seq, _now(), call.tool,
+                "INSERT INTO journal (call_id, plan_id, seq, ts_intent, ts_outcome, "
+                "tool, args_json, decision, risk, rev, status, mutates) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (call.call_id, call.plan_id, call.seq, _now(),
+                 _now() if closed else None, call.tool,
                  json.dumps(redact(call.args), sort_keys=True),
                  verdict.decision.value, verdict.risk.value, verdict.rev.value,
-                 Status.INTENDED),
+                 status, int(mutates)),
             )
         except sqlite3.IntegrityError as exc:
             raise JournalError(f"call_id {call.call_id!r} already journalled") from exc
@@ -90,7 +107,7 @@ class ActionJournal:
             result.call_id,
             "ts_outcome = ?, status = ?, inverse_json = ?, result_hash = ?, "
             "provenance = ?, error = ?",
-            (_now(), status, inverse, result_hash,
+            (_now(), status, inverse, result_hash or result.result_hash,
              result.provenance.value, result.error),
         )
 
@@ -142,6 +159,7 @@ class ActionJournal:
             args=json.loads(r["args_json"]),
             decision=Decision(r["decision"]), risk=Risk(r["risk"]),
             rev=Rev(r["rev"]), status=r["status"],
+            mutates=bool(r["mutates"]),
             inverse=(ToolCall.model_validate_json(r["inverse_json"])
                      if r["inverse_json"] else None),
             result_hash=r["result_hash"],

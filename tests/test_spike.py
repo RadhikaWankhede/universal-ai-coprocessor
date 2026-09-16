@@ -2,20 +2,19 @@ from __future__ import annotations
 
 from uaic.broker import CapabilitySet, decide
 from uaic.contracts import Origin, ToolCall
-from uaic.plugins import fs
+from uaic.plugins import FileSystemPlugin
 
 
-def test_spike_end_to_end(sandbox):
+def test_spike_end_to_end(sandbox, tmp_path):
     """A ToolCall travels broker -> plugin and comes back with real contents."""
     caps = CapabilitySet(plan_id="s1", tools=frozenset({"fs.list"}),
                          path_grants=(sandbox["downloads"],))
     c = ToolCall(call_id="c1", plan_id="s1", tool="fs.list",
                  args={"path": str(sandbox["downloads"])}, origin=Origin.USER)
 
-    v = decide(c, caps)
-    assert v.allowed
+    assert decide(c, caps).allowed
 
-    r = fs.execute(c)
+    r = FileSystemPlugin(tmp_path / "trash").execute(c)
     assert r.ok
     assert set(r.payload) == {"a.pdf", "sub"}
     assert r.provenance.value == "untrusted"

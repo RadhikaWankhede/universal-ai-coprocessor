@@ -80,11 +80,13 @@ without a language model.
 
 ## Status
 
-Phase 1 complete. Broker core complete: YAML manifests with startup
-validation, canonical path resolution hardened against traversal, symlinks,
-junctions, NUL bytes and Windows short names, four risk levels with
-registered escalation predicates, the GATE policy table, and a step budget.
-73 tests, ruff clean.
+Contracts, Capability Broker, Action Journal, Undo Engine, filesystem plugin
+and runtime execution loop all complete. Trash-backed delete implemented, so
+deletion sits in the reversible tier. End-to-end demo runs: a five-step plan
+where three reversible steps execute with zero prompts, an out-of-scope move
+is denied, an unapproved mail.send is denied by the capability freeze, and
+undo reverses all three executed steps including the trashed file.
+129 tests, ruff clean.
 
-Next: the confirmation gate needs wiring to a real user prompt, then the
-Action Journal (SQLite, WAL, append-only trigger) and the Undo Engine.
+Next: the Agent Core — planner over native LLM tool-calling, generating tool
+schemas from the same manifests the broker validates against.

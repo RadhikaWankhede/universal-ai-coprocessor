@@ -8,6 +8,7 @@ tools:
     scope_args: [repo]
     risk: low
     rev: reversible
+    mutates: false
 
   - name: git.commit
     summary: Commit staged changes

@@ -58,6 +58,7 @@ class ToolResult(BaseModel):
     payload: Any | None = None
     provenance: Provenance = Provenance.UNTRUSTED
     inverse: ToolCall | None = None
+    result_hash: str | None = None     # lets undo prove it restored the prior state
     error: str | None = None
     duration_ms: int = 0
 

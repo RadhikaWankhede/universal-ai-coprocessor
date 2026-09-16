@@ -51,6 +51,8 @@ class UndoEngine:
 
         for row in self._journal.rows(plan_id, status=Status.EXECUTED,
                                       newest_first=True):
+            if not row.mutates:
+                continue          # read-only: nothing to reverse, not a wall
             if row.rev is Rev.IRREVERSIBLE:
                 report.stopped_at = row
                 report.stop_reason = "irreversible"

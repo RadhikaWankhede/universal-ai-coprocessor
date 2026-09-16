@@ -8,6 +8,7 @@ tools:
     scope_args: [path]
     risk: low
     rev: reversible
+    mutates: false
 
   - name: fs.read
     summary: Read the contents of a file
@@ -16,6 +17,7 @@ tools:
     scope_args: [path]
     risk: low
     rev: reversible
+    mutates: false
 
   - name: fs.copy
     summary: Copy a file
