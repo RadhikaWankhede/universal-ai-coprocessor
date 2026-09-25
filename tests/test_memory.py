@@ -31,10 +31,22 @@ def test_a_failure_note_is_untrusted_because_it_quotes_the_thing_that_failed():
     assert not memory.items[0].trusted
 
 
-def test_a_note_can_be_marked_trusted_only_explicitly():
-    memory = SessionMemory().noted("the user declined the plan",
-                                   provenance=Provenance.TRUSTED)
-    assert memory.items[0].trusted
+def test_a_note_cannot_be_made_trusted_at_all():
+    """There is no keyword for it, so the property holds by construction
+    rather than by every call site remembering to omit an argument."""
+    with pytest.raises(TypeError):
+        SessionMemory().noted("the user declined", provenance=Provenance.TRUSTED)
+
+
+def test_only_two_methods_can_produce_a_trusted_entry():
+    memory = (SessionMemory()
+              .user_said("tidy my downloads")
+              .remember_fact("reports_folder", "D:/Reports")
+              .noted("fs.move failed")
+              .observed("fs.read", POISON))
+
+    assert [i.kind for i in memory.items if i.trusted] == ["user"]
+    assert memory.facts == {"reports_folder": "D:/Reports"}
 
 
 def test_replayed_untrusted_content_is_still_wrapped(recwarn):

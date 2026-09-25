@@ -5,6 +5,9 @@ relevant design decision is the one rule below, and it is easy to get wrong:
 
     ONLY THE USER'S OWN WORDS ARE TRUSTED.
 
+Exactly two methods create a trusted entry - `user_said` and `remember_fact`
+- and both take their content straight from the user.
+
 Memory is the obvious place to launder provenance. A poisoned sentence read
 out of a PDF on turn one becomes "earlier context" by turn three, and if
 memory replays it as ordinary history the untrusted wrapper is gone and the
@@ -71,14 +74,22 @@ class SessionMemory:
         return self._add("tool_result", f"{tool} -> {payload}",
                          Provenance.UNTRUSTED, source_ref)
 
-    def noted(self, text: str, *,
-              provenance: Provenance = Provenance.UNTRUSTED) -> SessionMemory:
+    def noted(self, text: str) -> SessionMemory:
         """A note the runtime writes about itself - a refusal, a failure.
 
-        Untrusted by default because failure messages quote the thing that
-        failed, and that quotation may have come from a file.
+        Always untrusted, and there is no argument to make it otherwise.
+        Failure messages quote the thing that failed, and that quotation may
+        have come out of a file.
+
+        This originally took a `provenance` keyword so that a note the runtime
+        wrote entirely by itself could be trusted. Nothing used it, and a
+        reviewer pointed out that it left the class with a third route to a
+        trusted entry - so the security property held by convention at every
+        call site rather than by construction. The keyword is gone. If a
+        trusted system note is ever genuinely needed, it should arrive as its
+        own named method, so that the exception is visible in the API.
         """
-        return self._add("note", text, provenance)
+        return self._add("note", text, Provenance.UNTRUSTED)
 
     def remember_fact(self, key: str, value: str) -> SessionMemory:
         """A durable preference stated by the USER. Never inferred from a file."""

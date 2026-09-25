@@ -243,7 +243,11 @@ class AgentLoop:
                               f"{self._max_retries} retries")
             return None
 
-        error = failed.result.error if failed.ran else "refused"
+        # `_replan` is only reached from the FAILED path, where the step ran
+        # and returned a result. Refusals return before this point, so there
+        # is no branch here for them - an unreachable else would just be dead
+        # code pretending to be caution.
+        error = failed.result.error
         try:
             revised = self._planner.propose(
                 f"The step {failed.call.tool} failed: {error}. "
