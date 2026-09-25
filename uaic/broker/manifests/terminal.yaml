@@ -1,0 +1,75 @@
+# Terminal access as a CLOSED LIST OF NAMED OPERATIONS.
+#
+# There is deliberately no `terminal.run` that accepts a command string. A
+# free-text shell tool would let the planner execute code the broker never
+# classified, which would make every other check in this project decorative.
+# Adding a terminal capability therefore means adding a named tool here and
+# classifying it - a deliberate act, not a side effect.
+#
+# Note the classification of run_tests and run_linter: executing a test suite
+# runs arbitrary project code, so it is irreversible and high risk even though
+# it feels like a read-only operation. The taxonomy is about blast radius, not
+# about how harmless the verb sounds.
+plugin: terminal
+version: 1
+tools:
+  - name: terminal.python_version
+    summary: Report the interpreter version
+    args: {}
+    scope_args: []
+    risk: low
+    rev: reversible
+    mutates: false
+
+  - name: terminal.which
+    summary: Report whether a named executable is on PATH
+    args:
+      binary: {type: str}
+    scope_args: []
+    risk: low
+    rev: reversible
+    mutates: false
+
+  - name: terminal.pip_list
+    summary: List installed packages in the active environment
+    args: {}
+    scope_args: []
+    risk: low
+    rev: reversible
+    mutates: false
+
+  - name: terminal.pip_install
+    summary: Install one package into the active environment
+    args:
+      package: {type: str}
+    scope_args: []
+    risk: high
+    rev: compensable
+    inverse: terminal.pip_uninstall
+
+  - name: terminal.pip_uninstall
+    summary: Uninstall one package from the active environment
+    args:
+      package: {type: str}
+    scope_args: []
+    risk: medium
+    rev: compensable
+    inverse: terminal.pip_install
+
+  - name: terminal.run_tests
+    summary: Run the project test suite (executes project code)
+    args:
+      repo: {type: path}
+    scope_args: [repo]
+    risk: high
+    rev: irreversible
+    mutates: true
+
+  - name: terminal.run_linter
+    summary: Run the project linter (executes the linter, not project code)
+    args:
+      repo: {type: path}
+    scope_args: [repo]
+    risk: low
+    rev: reversible
+    mutates: false

@@ -21,10 +21,13 @@ tools:
     inverse: git.revert
 
   - name: git.branch
-    summary: Create a branch
+    summary: Create a branch, optionally at a specific commit
     args:
       repo: {type: path}
       name: {type: str}
+      # Needed so that undoing a branch DELETION can put the branch back where
+      # it actually pointed, rather than at whatever HEAD happens to be now.
+      start_point: {type: str, required: false}
     scope_args: [repo]
     risk: low
     rev: compensable
@@ -38,3 +41,25 @@ tools:
     scope_args: [repo]
     risk: critical
     rev: irreversible
+
+  # ---- inverse operations, declared so undo can actually dispatch them -------
+  # An inverse that is not itself a declared tool would be refused by the
+  # broker with BRK.UNDECLARED_TOOL, which would make undo unusable.
+
+  - name: git.revert
+    summary: Revert a commit by creating a new commit that undoes it
+    args:
+      repo: {type: path}
+      sha: {type: str}
+    scope_args: [repo]
+    risk: low
+    rev: compensable
+
+  - name: git.branch_delete
+    summary: Delete a local branch
+    args:
+      repo: {type: path}
+      name: {type: str}
+    scope_args: [repo]
+    risk: medium
+    rev: compensable
