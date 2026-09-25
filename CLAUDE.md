@@ -80,13 +80,11 @@ without a language model.
 
 ## Status
 
-Contracts, Capability Broker, Action Journal, Undo Engine, filesystem plugin
-and runtime execution loop all complete. Trash-backed delete implemented, so
-deletion sits in the reversible tier. End-to-end demo runs: a five-step plan
-where three reversible steps execute with zero prompts, an out-of-scope move
-is denied, an unapproved mail.send is denied by the capability freeze, and
-undo reverses all three executed steps including the trashed file.
-129 tests, ruff clean.
+Everything except the LLM adapter and the remaining plugins is built and
+tested: contracts, Plan, Capability Broker, capability freeze, Action Journal,
+Undo Engine, filesystem plugin with trash-backed delete, runtime execution
+loop, context trust boundary, manifest-derived tool schemas. 167 tests, ruff
+clean, no API key required to run any of them.
 
-Next: the Agent Core — planner over native LLM tool-calling, generating tool
-schemas from the same manifests the broker validates against.
+Next: the LLM adapter behind the Planner protocol (needs a provider and an
+API key), then the documents plugin for PDF extraction.
