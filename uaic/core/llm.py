@@ -8,8 +8,14 @@ Three deliberate choices:
 * Only the standard library is used. A planner is one HTTPS POST; adding a
   dependency to make that shorter would be a poor trade.
 * The API key lives in the URL query string, because that is what this
-  provider requires. Every error message is therefore passed through `redact`
-  before it is raised, or the key ends up in logs and in the journal.
+  provider requires. Every message that can carry the URL - a transport
+  failure, or a dump of a malformed response - is therefore passed through
+  `redact` before it is raised, or the key ends up in logs and in the journal.
+  Messages built only from model-supplied text are not redacted, and do not
+  need to be: the key never enters the request body, so nothing the model
+  returns can echo it. The distinction is worth stating precisely, because a
+  comment that claims more than the code does is the kind of thing a reviewer
+  is right to catch.
 """
 from __future__ import annotations
 

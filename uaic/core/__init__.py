@@ -8,6 +8,7 @@ from uaic.core.context import (
 )
 from uaic.core.gemini import GeminiPlanner
 from uaic.core.llm import HttpTransport, LLMError, PlannerError, Transport, redact
+from uaic.core.memory import Remembered, SessionMemory
 from uaic.core.planner import PlanBuilder, Planner, ScriptedPlanner
 
 __all__ = [
@@ -19,7 +20,9 @@ __all__ = [
     "PlanBuilder",
     "Planner",
     "PlannerError",
+    "Remembered",
     "ScriptedPlanner",
+    "SessionMemory",
     "Transport",
     "redact",
     "render",
