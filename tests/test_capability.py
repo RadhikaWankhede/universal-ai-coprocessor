@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from uaic.broker import is_inside, resolve
+from uaic.broker import CapabilitySet, is_inside, resolve
 
 
 def test_plain_file_is_inside(sandbox):
@@ -172,3 +172,21 @@ def test_no_grants_means_nothing_is_covered(sandbox):
     from uaic.broker import CapabilitySet
     caps = CapabilitySet(plan_id="p1", tools=frozenset({"fs.read"}), path_grants=())
     assert not caps.covers_path(resolve(sandbox["downloads"] / "a.pdf"))
+
+
+def test_a_capability_set_refuses_to_be_built_with_an_unknown_field():
+    """Found in review: without extra="forbid", `roots=` instead of
+    `path_grants=` silently produced a capability set granting nothing. It
+    failed closed, but it surfaced as puzzling out-of-scope denials rather
+    than as the typo it was."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CapabilitySet(plan_id="p1", tools=frozenset({"fs.list"}),
+                      roots=(Path("/tmp"),))
+
+
+def test_a_correctly_spelled_grant_still_works():
+    caps = CapabilitySet(plan_id="p1", tools=frozenset({"fs.list"}),
+                         path_grants=(Path("/tmp"),))
+    assert len(caps.path_grants) == 1

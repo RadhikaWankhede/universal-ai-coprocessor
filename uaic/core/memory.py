@@ -32,7 +32,15 @@ from uaic.core.context import ContextAssembler
 Kind = Literal["user", "tool_result", "note"]
 
 MAX_TURNS = 20          # a bounded window: context cost must not grow with time
-MAX_CHARS = 4000        # one enormous file must not evict everything else
+
+# Per-entry cap, so one enormous file cannot crowd out everything else. The
+# worst-case window is MAX_TURNS * MAX_CHARS = 80,000 characters, roughly
+# 20k tokens, replayed on every planning call. That is the budget being
+# protected, and raising this cap raises it twenty-fold per step. It is not
+# raised because the planner does not need the whole document - it needs to
+# know what it has and what it is missing, which the truncation notice now
+# tells it, and doc.extract_text takes a page range for anything further.
+MAX_CHARS = 4000
 
 
 def _now() -> str:
@@ -46,10 +54,17 @@ class Remembered:
     provenance: Provenance
     source_ref: str | None = None
     ts: str = ""
+    # Characters cut from the end of `text` by MAX_CHARS. Kept as a number,
+    # never appended to `text`: see `context()` for where it is announced.
+    dropped: int = 0
 
     @property
     def trusted(self) -> bool:
         return self.provenance is Provenance.TRUSTED
+
+    @property
+    def truncated(self) -> bool:
+        return self.dropped > 0
 
 
 class SessionMemory:
@@ -100,9 +115,12 @@ class SessionMemory:
 
     def _add(self, kind: Kind, text: str, provenance: Provenance,
              source_ref: str | None = None) -> SessionMemory:
-        self._items.append(Remembered(kind=kind, text=str(text)[: self._max_chars],
+        text = str(text)
+        kept = text[: self._max_chars]
+        self._items.append(Remembered(kind=kind, text=kept,
                                       provenance=provenance,
-                                      source_ref=source_ref, ts=_now()))
+                                      source_ref=source_ref, ts=_now(),
+                                      dropped=len(text) - len(kept)))
         # Oldest first out. The user's original request is usually the thing
         # worth keeping longest, so it is re-stated by the caller if needed;
         # silently pinning it here would make the window size a lie.
@@ -144,8 +162,11 @@ class SessionMemory:
             assembler.add_user(f"Remembered preferences:\n{lines}")
         for item in self._items:
             if item.trusted:
-                assembler.add_user(item.text)
+                assembler.add_user(item.text, item.dropped)
             else:
-                # Re-wrapped, with a NEW nonce each time it is replayed.
-                assembler.add_tool_result(item.text, item.source_ref)
+                # Re-wrapped, with a NEW nonce each time it is replayed. The
+                # truncation notice travels as a number and is rendered into
+                # the opening tag, outside the content, so a document cannot
+                # forge one or hide the real one.
+                assembler.add_tool_result(item.text, item.source_ref, item.dropped)
         return assembler

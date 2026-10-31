@@ -4,10 +4,19 @@ Three rules, and every plugin that shells out obeys all three:
 
 1. Arguments are a LIST. `shell=False`, always. There is no string that a shell
    ever parses, so quoting, `;`, `&&` and backticks are not attack surface.
-2. Every value that came from a plan is validated against a strict pattern
-   before it is placed in that list. A list alone does not stop argument
-   injection: a "branch name" of `--force` is a perfectly valid list element
-   and would be read by git as a flag. Values may not begin with a hyphen.
+2. Every plan-supplied value that could be READ AS A FLAG is validated against
+   a strict pattern before it is placed in that list, and may not begin with
+   a hyphen. A list alone does not stop argument injection: a "branch name"
+   of `--force` is a perfectly valid list element and git would read it as a
+   flag.
+
+   Two plan-supplied values are deliberately NOT pattern-checked. A commit
+   message follows `-m` and a repository path follows `-C`; each flag
+   consumes the next element as its value, so neither can be re-read as a
+   flag. A commit message also cannot be pattern-restricted and stay useful;
+   it is only required to be non-empty. The repository path is checked by
+   other means: the broker scopes it, and git.py requires a `.git` entry
+   inside it.
 3. Every call has a timeout. A hung subprocess is a hung agent.
 """
 from __future__ import annotations

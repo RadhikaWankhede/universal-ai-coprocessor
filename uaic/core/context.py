@@ -36,6 +36,10 @@ class ContextBlock(BaseModel):
     content: str
     provenance: Provenance = Provenance.UNTRUSTED
     source_ref: str | None = None      # e.g. file:///inbox/report.pdf#page=3
+    # How many characters were cut from the END of `content` before it got
+    # here. Carried as a number rather than as text inside `content`, so that
+    # the announcement is written by this module and not by the document.
+    dropped_chars: int = 0
 
     def is_trusted(self) -> bool:
         return self.provenance is Provenance.TRUSTED
@@ -47,22 +51,38 @@ def system_block(extra: str = "") -> ContextBlock:
                         provenance=Provenance.TRUSTED)
 
 
-def user_block(text: str) -> ContextBlock:
-    return ContextBlock(role="user", content=text, provenance=Provenance.TRUSTED)
+def user_block(text: str, dropped_chars: int = 0) -> ContextBlock:
+    return ContextBlock(role="user", content=text, provenance=Provenance.TRUSTED,
+                        dropped_chars=dropped_chars)
 
 
-def tool_result_block(content: str, source_ref: str | None = None) -> ContextBlock:
+def tool_result_block(content: str, source_ref: str | None = None,
+                      dropped_chars: int = 0) -> ContextBlock:
     """Everything a plugin returns is untrusted, always."""
     return ContextBlock(role="tool_result", content=content,
-                        provenance=Provenance.UNTRUSTED, source_ref=source_ref)
+                        provenance=Provenance.UNTRUSTED, source_ref=source_ref,
+                        dropped_chars=dropped_chars)
+
+
+def truncation_notice(dropped_chars: int) -> str:
+    return f"the last {dropped_chars} characters were dropped"
 
 
 def render(block: ContextBlock, *, nonce: str | None = None) -> str:
     if block.is_trusted():
+        if block.dropped_chars:
+            return f"{block.content}\n[truncated: {truncation_notice(block.dropped_chars)}]"
         return block.content
     nonce = nonce or secrets.token_hex(4)
     src = f' src="{block.source_ref}"' if block.source_ref else ""
-    return (f'<untrusted id="{nonce}"{src}>\n'
+    # The truncation notice goes in the OPENING TAG, which precedes every byte
+    # of content. Text inside the block can imitate a notice, but it cannot
+    # place one before itself, so the only notice in the tag that carries this
+    # block's nonce is the real one. A notice appended inside the block, after
+    # the content, would be indistinguishable from content that forged it.
+    trunc = (f' truncated="{truncation_notice(block.dropped_chars)}"'
+             if block.dropped_chars else "")
+    return (f'<untrusted id="{nonce}"{src}{trunc}>\n'
             f'{block.content}\n'
             f'</untrusted id="{nonce}">')
 
@@ -80,11 +100,12 @@ class ContextAssembler:
         self._blocks.append(block)
         return self
 
-    def add_user(self, text: str) -> ContextAssembler:
-        return self.add(user_block(text))
+    def add_user(self, text: str, dropped_chars: int = 0) -> ContextAssembler:
+        return self.add(user_block(text, dropped_chars))
 
-    def add_tool_result(self, content: str, source_ref: str | None = None):
-        return self.add(tool_result_block(content, source_ref))
+    def add_tool_result(self, content: str, source_ref: str | None = None,
+                        dropped_chars: int = 0):
+        return self.add(tool_result_block(content, source_ref, dropped_chars))
 
     @property
     def blocks(self) -> tuple[ContextBlock, ...]:

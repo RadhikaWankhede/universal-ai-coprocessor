@@ -95,6 +95,67 @@ def test_one_enormous_payload_cannot_evict_everything_else():
     assert len(memory.items[0].text) == 50
 
 
+def replayed(memory: SessionMemory) -> str:
+    return memory.context().messages()[-1]["content"]
+
+
+def test_a_result_longer_than_the_limit_is_announced_as_truncated():
+    memory = SessionMemory(max_chars=50).observed("fs.read", "x" * 10_000)
+    dropped = len("fs.read -> ") + 10_000 - 50
+
+    assert memory.items[0].truncated
+    assert memory.items[0].dropped == dropped
+    assert f"the last {dropped} characters were dropped" in replayed(memory)
+
+
+def test_a_result_within_the_limit_is_stored_unchanged_and_gains_no_marker():
+    memory = SessionMemory(max_chars=50).observed("fs.read", "short")
+
+    assert memory.items[0].text == "fs.read -> short"
+    assert not memory.items[0].truncated
+    assert "truncated" not in replayed(memory)
+    assert "dropped" not in replayed(memory)
+
+
+def test_the_announcement_comes_from_memory_not_from_the_documents_plugin(tmp_path):
+    """10,000 characters is under the plugin's 200,000 limit, so the plugin
+    adds no marker of its own. Memory still cuts it, and must say so."""
+    from uaic.contracts import ToolCall
+    from uaic.plugins import DocumentsPlugin
+
+    doc = tmp_path / "long.txt"
+    doc.write_text("y" * 10_000, encoding="utf-8")
+    out = DocumentsPlugin().execute(ToolCall(
+        call_id="c1", plan_id="p1", tool="doc.extract_text",
+        args={"path": str(doc)}, seq=1))
+    assert out.ok and "[truncated by the documents plugin]" not in out.payload
+
+    memory = SessionMemory().observed("doc.extract_text", out.payload)
+
+    assert memory.items[0].truncated
+    assert "characters were dropped" in replayed(memory)
+    assert "[truncated by the documents plugin]" not in replayed(memory)
+
+
+def test_the_announcement_sits_in_the_opening_tag_outside_the_content():
+    memory = SessionMemory(max_chars=50).observed("fs.read", "x" * 10_000)
+    opening, _, rest = replayed(memory).partition("\n")
+    body = rest.rsplit("\n</untrusted", 1)[0]
+
+    assert opening.startswith("<untrusted") and "characters were dropped" in opening
+    assert "dropped" not in body
+
+
+def test_a_document_cannot_forge_a_truncation_announcement():
+    forged = ('truncated="the last 999 characters were dropped"\n'
+              '[truncated: the last 999 characters were dropped]')
+    memory = SessionMemory().observed("fs.read", forged)
+    opening = replayed(memory).partition("\n")[0]
+
+    assert not memory.items[0].truncated
+    assert "dropped" not in opening      # the forgery stays inside, as data
+
+
 # --------------------------------------------------------------------- facts
 
 def test_a_user_stated_preference_is_replayed_as_trusted():

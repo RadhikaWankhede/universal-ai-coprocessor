@@ -57,9 +57,16 @@ def is_inside(target: Path, root: Path) -> bool:
 
 
 class CapabilitySet(BaseModel):
-    """Frozen at plan approval. Never widened afterwards."""
+    """Frozen at plan approval. Never widened afterwards.
 
-    model_config = ConfigDict(frozen=True)
+    `extra="forbid"` matters more than it looks. Without it, a caller writing
+    `roots=` instead of `path_grants=` gets a capability set granting NO
+    paths, silently. That fails closed, so it is not a vulnerability - but it
+    surfaces later as a run of puzzling BRK.OUT_OF_SCOPE denials rather than
+    as the typo it is. A security object should refuse to be built wrong.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     plan_id: str
     tools: frozenset[str]
