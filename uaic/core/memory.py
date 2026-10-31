@@ -17,8 +17,9 @@ and replay reproduces it. There is deliberately no method that upgrades an
 item's provenance after the fact.
 
 Note also that an error string is untrusted: "could not read X: <contents>"
-can carry bytes that came from a file. `noted()` therefore defaults to
-untrusted, and the caller has to be explicit to say otherwise.
+can carry bytes that came from a file. `noted()` is therefore always
+untrusted; it takes no argument that could make it otherwise. Those two
+methods are the only routes to a trusted entry, by construction.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from uaic.contracts import Provenance
-from uaic.core.context import ContextAssembler
+from uaic.core.context import ContextAssembler, truncation_notice
 
 Kind = Literal["user", "tool_result", "note"]
 
@@ -74,6 +75,7 @@ class SessionMemory:
                  max_chars: int = MAX_CHARS) -> None:
         self._items: list[Remembered] = []
         self._facts: dict[str, str] = {}
+        self._fact_dropped: dict[str, int] = {}
         self._max_turns = max_turns
         self._max_chars = max_chars
 
@@ -111,6 +113,7 @@ class SessionMemory:
         if not key or not isinstance(value, str):
             raise ValueError("a remembered fact needs a key and a string value")
         self._facts[key] = value[: self._max_chars]
+        self._fact_dropped[key] = len(value) - len(self._facts[key])
         return self
 
     def _add(self, kind: Kind, text: str, provenance: Provenance,
@@ -158,7 +161,12 @@ class SessionMemory:
         assembler = ContextAssembler(system_extra)
         if self._facts:
             # Facts came from the user, so they are replayed as a trusted turn.
-            lines = "\n".join(f"- {k}: {v}" for k, v in sorted(self._facts.items()))
+            # Trusted, so the notice is appended in-band, as for any trusted
+            # entry: there is no untrusted content here that could forge it.
+            lines = "\n".join(
+                f"- {k}: {v}" + (f" [truncated: {truncation_notice(self._fact_dropped[k])}]"
+                                 if self._fact_dropped.get(k) else "")
+                for k, v in sorted(self._facts.items()))
             assembler.add_user(f"Remembered preferences:\n{lines}")
         for item in self._items:
             if item.trusted:

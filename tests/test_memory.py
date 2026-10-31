@@ -165,6 +165,22 @@ def test_a_user_stated_preference_is_replayed_as_trusted():
     assert not messages[1]["content"].startswith("<untrusted")
 
 
+def test_a_long_preference_is_cut_and_the_cut_is_announced():
+    memory = SessionMemory(max_chars=50).remember_fact("style", "z" * 80)
+    replay = memory.context().messages()[1]["content"]
+
+    assert memory.facts["style"] == "z" * 50          # the value itself stays pure
+    assert "[truncated: the last 30 characters were dropped]" in replay
+
+
+def test_a_preference_within_the_limit_gains_no_marker():
+    memory = SessionMemory(max_chars=50).remember_fact("style", "concise")
+    replay = memory.context().messages()[1]["content"]
+
+    assert "- style: concise" in replay
+    assert "truncated" not in replay
+
+
 def test_a_fact_needs_a_key_and_a_string():
     with pytest.raises(ValueError):
         SessionMemory().remember_fact("", "x")
