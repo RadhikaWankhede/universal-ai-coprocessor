@@ -1,0 +1,26 @@
+# The documents plugin is the project's main untrusted INPUT: it brings the
+# outside world into the model's context. Both tools are read-only and both
+# return untrusted text, which is why neither declares an inverse and both
+# set mutates: false - undo walks straight past them.
+plugin: doc
+version: 1
+tools:
+  - name: doc.extract_text
+    summary: Extract the text of a document (PDF, txt, md, csv, log)
+    args:
+      path: {type: path}
+      # e.g. "3" or "2-5". Omitted means the whole document.
+      pages: {type: str, required: false}
+    scope_args: [path]
+    risk: low
+    rev: reversible
+    mutates: false
+
+  - name: doc.page_count
+    summary: Count the pages in a PDF
+    args:
+      path: {type: path}
+    scope_args: [path]
+    risk: low
+    rev: reversible
+    mutates: false
