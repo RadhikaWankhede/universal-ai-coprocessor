@@ -14,6 +14,7 @@ from uaic.broker import CapabilitySet, Registry, decide, default_registry
 from uaic.contracts import Decision, Rev, Risk, ToolCall, ToolResult, Verdict
 from uaic.journal import ActionJournal, JournalError, Status
 from uaic.runtime.binding import ConfirmationLedger
+from uaic.runtime.taint import escalate
 
 # Asks the user. Returns True to proceed. A plan-level confirmation covers the
 # calls of the approved plan (see binding.py); a step-level one is asked for
@@ -126,6 +127,11 @@ class Executor:
         verdict = decide(call, caps, registry=self._registry,
                          session_root=self._session_root)
         asked = 0
+
+        if call.tainted and not (ledger and ledger.approved(call)):
+            # Proposed with untrusted content in view, and never shown to the
+            # user: one tier up. Without a ledger nothing counts as approved.
+            verdict = escalate(verdict, call)
 
         if verdict.decision is Decision.DENY:
             self._record_refusal(call, verdict)

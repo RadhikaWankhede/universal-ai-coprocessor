@@ -3,7 +3,7 @@
     py scripts/mutation/run_mutants.py            # the whole matrix
     py scripts/mutation/run_mutants.py --show     # also print why each went red
 
-Each test is run in a fresh pytest process with one mutant from mutants.py
+Each test is run in a fresh pytest process with mutants from mutants.py
 applied. A test that stays GREEN with its defence removed is measuring
 nothing. Exit status is 0 only if every mapped run went red and every test
 in the injection suite is mapped.
@@ -18,14 +18,25 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 SUITE = "tests/test_injection.py"
+B = "tests/test_confirmation_binding.py"
+T = "tests/test_taint.py"
 
-# (file, substring of the test id) -> the mutants that must turn it red.
+# (file, substring of the test id) -> the mutants to run. Each must turn the
+# test RED, unless written "NAME=GREEN": that records an attack with two
+# independent defences, where removing one alone must leave the test green
+# because the other still stops it. "A+B" applies both mutants at once.
 # First match wins, so the more specific entries come first.
 MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (SUITE, "residual_poisoned_memory", ()),     # no code defence; see README
-    (SUITE, "residual_injected_call_to_a_frozen_reversible", ("UNDO_OFF",)),
+    (SUITE, "state_mediated_injection__reversible_swap_before_an_approved_commit[off]", ()),
+    (SUITE, "state_mediated_injection__reversible_swap_before_an_approved_commit[on]",
+     ("TAINT_OFF", "STAMP_OFF")),
+    (SUITE, "frozen_reversible_tool__fs_delete__escalated_by_taint[careful]",
+     ("TAINT_OFF", "STAMP_OFF")),
+    (SUITE, "frozen_reversible_tool__fs_delete__escalated_by_taint[rubber-stamp]",
+     ("TAINT_OFF", "UNDO_OFF")),
     (SUITE, "plan_confirmed_compensable_tool__git_commit__defeated_by_binding",
-     ("BINDING_OFF",)),
+     ("TAINT_OFF", "BINDING_OFF=GREEN", "BINDING_OFF+TAINT_OFF")),
     (SUITE, "trusted_channel", ("KEYWORD_FILTER",)),
     (SUITE, "every_attack_target", ("PLUGINS_MISSING",)),
     (SUITE, "[loop-escalation]", ("ESCALATION_OFF",)),
@@ -44,10 +55,17 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (SUITE, "confirmation_is_not_required", ("GATE_ALLOW",)),
     ("tests/test_loop.py", "untrusted_error_text_never_reaches_the_planner",
      ("PROMPT_LEAK",)),
-    ("tests/test_confirmation_binding.py", "retry_of_the_same_failed_call", ("ASK_EVERY_STEP",)),
-    ("tests/test_confirmation_binding.py", "replan_keeps_is_covered", ("PER_CALL",)),
-    ("tests/test_confirmation_binding.py", "second_time_asks_again", ("BINDING_OFF",)),
-    ("tests/test_confirmation_binding.py", "user_never_saw", ("BINDING_OFF",)),
+    (B, "retry_of_the_same_failed_call", ("ASK_EVERY_STEP",)),
+    (B, "replan_keeps_is_covered", ("PER_CALL",)),
+    (B, "second_time_asks_again", ("BINDING_OFF",)),
+    (B, "user_never_saw", ("BINDING_OFF=GREEN", "BINDING_OFF+TAINT_OFF")),
+    (T, "replan_after_a_read_is_tainted", ("STAMP_OFF",)),
+    (T, "failure_note_alone_taints", ("STAMP_OFF", "RESULTS_ONLY_TAINT")),
+    (T, "cannot_set_its_own_taint", ("STAMP_OFF",)),
+    (T, "retry_keeps_the_taint", ("STAMP_OFF",)),
+    (T, "next_runs_first_plan_carries", ("STAMP_OFF",)),
+    (T, "outside_the_approved_plan_is_escalated", ("TAINT_OFF",)),
+    (T, "without_a_ledger_nothing_counts", ("TAINT_OFF",)),
 ]
 
 
@@ -78,26 +96,26 @@ def run(nodeid: str, mutant: str) -> tuple[str, str]:
 
 def main() -> int:
     show = "--show" in sys.argv
-    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py",
-                                               "tests/test_confirmation_binding.py")
+    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T)
                                 for n in collect(path) if mutants_for(n) is not None]
     problems = 0
     for nodeid in nodeids:
         name = nodeid.split("::", 1)[1]
         mutants = mutants_for(nodeid)
         if mutants is None:
-            print(f"{'UNMAPPED':16} {'?':6} {name}")
+            print(f"{'UNMAPPED':24} {'?':6} {name}")
             problems += 1
             continue
         if not mutants:
-            print(f"{'(no mutant)':16} {'n/a':6} {name}")
+            print(f"{'(no mutant)':24} {'n/a':6} {name}")
             continue
-        for mutant in mutants:
+        for entry in mutants:
+            mutant, _, expect = entry.partition("=")
             verdict, why = run(nodeid, mutant)
-            print(f"{mutant:16} {verdict:6} {name}")
+            print(f"{entry:24} {verdict:6} {name}")
             if show and why:
-                print(f"{'':23}{why[:150]}")
-            problems += verdict != "RED"
+                print(f"{'':31}{why[:150]}")
+            problems += verdict != (expect or "RED")
     print(f"\n{problems} problem(s).")
     return 1 if problems else 0
 

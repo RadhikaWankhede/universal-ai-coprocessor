@@ -1,4 +1,4 @@
-from uaic.contracts.plan import Plan, PlanStep
+from uaic.contracts.plan import Plan, PlanStep, SourceRead, parse_source
 from uaic.contracts.tools import (
     Decision,
     Origin,
@@ -18,7 +18,9 @@ __all__ = [
     "Provenance",
     "Rev",
     "Risk",
+    "SourceRead",
     "ToolCall",
     "ToolResult",
     "Verdict",
+    "parse_source",
 ]

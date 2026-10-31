@@ -46,16 +46,32 @@ To run one weakening by hand:
 | `BINDING_OFF`      | Confirmation binding, reverted: one plan-level "yes" covers every later plan-level call in the run. |
 | `PER_CALL`         | Stricter binding: a "yes" covers only the call shown in that dialog, not the rest of the approved plan. |
 | `ASK_EVERY_STEP`   | No binding at all: every plan-level dispatch is asked, retries included. |
+| `TAINT_OFF`        | Taint escalation: a tainted call outside the approved plan keeps its tier. |
+| `STAMP_OFF`        | Taint propagation: the loop never marks a plan or its calls as tainted. |
+| `RESULTS_ONLY_TAINT` | Not a defence removal but the refinement candidate: only tool results taint, failure notes do not. Used by `confirmation_cost.py`, and by one test that pins the broad rule. |
 | `KEYWORD_FILTER`   | Adds a content filter to the **trusted** channel. The negative control must catch it, which proves the defences are provenance, not keywords. |
 | `PLUGINS_MISSING`  | The fs and mail plugins are not loaded. The "legitimately granted" controls must catch it, which proves every refusal was the broker's decision. |
 | `UNDO_OFF`         | The undo engine reports success and reverses nothing. |
+
+## Combined weakenings and expected greens
+
+An entry `A+B` applies both mutants in one run. An entry `A=GREEN` expects
+the test to stay **green**. It is used where an attack has two independent
+defences: removing one alone must leave the test passing, because the other
+still stops it, and removing both (`A+B`) must turn it red. For example, the
+injected `git.commit` is stopped by confirmation binding and by taint
+escalation, so `BINDING_OFF=GREEN`, `TAINT_OFF` and `BINDING_OFF+TAINT_OFF`
+are all in its row.
 
 ## Reading the residual tests
 
 Tests named `test_residual_*` record attacks that are **not** structurally
 defeated. Their mutant is the one that would *close* the gap, or break the
-remedy. For example, `UNDO_OFF` makes the frozen-reversible-tool test go red,
-because the injected delete then cannot be reversed.
+remedy. For example, `UNDO_OFF` makes the rubber-stamp variant of the
+frozen-reversible-tool test go red, because a delete the user said yes to can
+then not be reversed. The `[off]` variant of the state-mediated test has no
+mutant: what stops the attacker's content reaching the commit there is git's
+index, not a defence of ours.
 
 The binding mutants run against `tests/test_confirmation_binding.py` as well
 as the injection suite. Between them they pin the binding from both sides:

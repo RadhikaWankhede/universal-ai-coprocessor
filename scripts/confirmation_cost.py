@@ -2,15 +2,17 @@
 
     py scripts/confirmation_cost.py
 
-Runs the existing end-to-end tests (everything except the binding's own
-tests) three times, each in a fresh pytest process:
+Runs the end-to-end tests (everything except the binding's and taint's own
+unit tests) once per mode, each in a fresh pytest process:
 
-    before    the old rule - one plan-level "yes" covers every later
-              plan-level call in the run (mutant BINDING_OFF)
-    after     confirmation binding as shipped - a plan-level "yes" covers
-              the calls of the approved plan
-    per-call  the stricter alternative - a "yes" covers only the call shown
-              in that dialog (mutant PER_CALL)
+    before        no binding, no taint escalation (BINDING_OFF+TAINT_OFF)
+    binding       confirmation binding only (TAINT_OFF)
+    broad-taint   as shipped: binding + escalation of every tainted call
+                  outside the approved plan, where ANY untrusted entry -
+                  tool result or failure note - taints
+    results-only  the refinement candidate, not shipped: as broad-taint,
+                  but only tool RESULTS taint, not failure notes
+                  (RESULTS_ONLY_TAINT)
 
 Every AgentLoop.run and Executor.run_plan is recorded with its outcome and
 the number of questions it actually asked. Only the counts matter here, so a
@@ -30,8 +32,9 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MODES = {"before": "BINDING_OFF", "after": "", "per-call": "PER_CALL"}
-EXCLUDE = "tests/test_confirmation_binding.py"
+MODES = {"before": "BINDING_OFF+TAINT_OFF", "binding": "TAINT_OFF", "broad-taint": "",
+         "results-only": "RESULTS_ONLY_TAINT"}
+EXCLUDE = ("tests/test_confirmation_binding.py", "tests/test_taint.py")
 
 
 # ------------------------------------------------------------- as a plugin
@@ -76,7 +79,7 @@ def measure(mutant: str) -> list[dict]:
                                                str(ROOT / "scripts" / "mutation")]))
         subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
                         "-p", "mutants", "-p", "confirmation_cost", "tests",
-                        f"--ignore={EXCLUDE}"],
+                        *(f"--ignore={path}" for path in EXCLUDE)],
                        cwd=ROOT, env=env, capture_output=True, text=True, check=False)
         return [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
 
@@ -84,13 +87,13 @@ def measure(mutant: str) -> list[dict]:
 def main() -> int:
     results = {mode: measure(mutant) for mode, mutant in MODES.items()}
 
-    print(f"{'mode':9} | {'tasks':>5} | {'completed':>9} | {'questions':>9} | "
+    print(f"{'mode':12} | {'tasks':>5} | {'completed':>9} | {'questions':>9} | "
           f"{'on completed':>12} | per completed task")
-    print("-" * 78)
+    print("-" * 81)
     for mode, rows in results.items():
         done = [r for r in rows if r["completed"]]
         asked_done = sum(r["asked"] for r in done)
-        print(f"{mode:9} | {len(rows):5} | {len(done):9} | {sum(r['asked'] for r in rows):9} | "
+        print(f"{mode:12} | {len(rows):5} | {len(done):9} | {sum(r['asked'] for r in rows):9} | "
               f"{asked_done:12} | {asked_done / len(done):.3f}" if done else "")
 
     # Where the modes disagree, task by task (tests are deterministic, so the

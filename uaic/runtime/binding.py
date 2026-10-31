@@ -91,6 +91,10 @@ class ConfirmationLedger:
     def _sig(self, call: ToolCall) -> Signature:
         return signature(call, self._registry, self._session_root)
 
+    def approved(self, call: ToolCall) -> bool:
+        """True if `call` is one of the calls of the approved plan."""
+        return self._sig(call) in self._shown
+
     def covers(self, call: ToolCall) -> bool:
         """True if a plan-level question about `call` was already answered yes."""
         return self._authorised[self._sig(call)] > 0

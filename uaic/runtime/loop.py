@@ -34,6 +34,7 @@ from uaic.core.memory import SessionMemory
 from uaic.journal import Status
 from uaic.runtime.executor import Executor, StepOutcome
 from uaic.runtime.freeze import escalation_needed, freeze_plan
+from uaic.runtime.taint import taint_of
 
 MAX_RETRIES = 2         # per step
 MAX_REPLANS = 1         # per run
@@ -177,6 +178,7 @@ class AgentLoop:
             self.memory.noted(f"planning failed: {exc}", source_ref=f"planner:{plan_id}")
             return report
 
+        plan = self._stamp(plan)
         report.plan = plan
 
         granted = self._approve(plan)
@@ -251,6 +253,15 @@ class AgentLoop:
         """
         return len(plan.steps) * (1 + self._max_replans) + STEP_HEADROOM
 
+    def _stamp(self, plan: Plan) -> Plan:
+        """Mark the plan with the taint of the memory its planner was just given.
+
+        The runtime does this, not the planner: a compromised model must not be
+        able to clear its own taint, so any value the planner set is overwritten.
+        """
+        tainted, sources = taint_of(self.memory)
+        return plan.model_copy(update={"tainted": tainted, "taint_sources": sources})
+
     def _remember(self, outcome: StepOutcome) -> None:
         source = source_of(outcome.call)
         if outcome.ran and outcome.result.ok:
@@ -290,6 +301,7 @@ class AgentLoop:
             return None
 
         report.replans += 1
+        revised = self._stamp(revised)
 
         needed = escalation_needed(revised, caps)
         if needed:

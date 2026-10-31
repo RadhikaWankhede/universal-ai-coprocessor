@@ -1,4 +1,4 @@
-"""A pytest plugin that weakens exactly one defence, chosen by $MUTANT.
+"""A pytest plugin that weakens defences, chosen by $MUTANT ("A" or "A+B").
 
 Loaded with `-p mutants` by run_mutants.py. With $MUTANT unset it does
 nothing. Each entry in MUTANTS is a function that monkeypatches one defence
@@ -134,6 +134,32 @@ def ask_every_step() -> None:
     ConfirmationLedger.covers = lambda self, call: False
 
 
+def taint_off() -> None:
+    """Taint escalation: tainted calls outside the approved plan keep their tier."""
+    import uaic.runtime.executor as executor
+    executor.escalate = lambda verdict, call: verdict
+
+
+def stamp_off() -> None:
+    """Taint propagation: the loop never marks a plan or its calls as tainted."""
+    import uaic.runtime.loop as loop
+    loop.AgentLoop._stamp = lambda self, plan: plan
+
+
+def results_only_taint() -> None:
+    """The refinement candidate, NOT shipped: only tool RESULTS taint a plan.
+    Failure and refusal notes no longer do - which gives up the error-message
+    channel (a git hook's stderr reaches the planner as a failure note)."""
+    import uaic.runtime.loop as loop
+    from uaic.runtime.taint import UNKNOWN_SOURCE
+
+    def taint_of(memory):
+        items = [i for i in memory.items if not i.trusted and i.kind == "tool_result"]
+        sources = tuple(dict.fromkeys(i.source_ref or UNKNOWN_SOURCE for i in items))
+        return bool(items), sources
+    loop.taint_of = taint_of
+
+
 def keyword_filter() -> None:
     """Adds a content filter to the TRUSTED channel: lines naming mail.send are
     stripped from what the user says. The negative control must catch this."""
@@ -163,13 +189,14 @@ def undo_off() -> None:
 MUTANTS = {fn.__name__.upper(): fn for fn in (
     escalation_off, freeze_off, undeclared_off, nonce_fixed, noted_trusted,
     observed_trusted, scope_off, no_resolve, gate_allow, silent_trunc, prompt_leak,
-    binding_off, per_call, ask_every_step, keyword_filter, plugins_missing, undo_off)}
+    binding_off, per_call, ask_every_step, taint_off, stamp_off, results_only_taint,
+    keyword_filter, plugins_missing, undo_off)}
 
 
 def pytest_configure(config) -> None:
-    name = os.environ.get("MUTANT")
-    if not name:
-        return
-    if name not in MUTANTS:
-        raise SystemExit(f"unknown mutant {name!r}; known: {', '.join(MUTANTS)}")
-    MUTANTS[name]()
+    names = [n for n in os.environ.get("MUTANT", "").split("+") if n]
+    unknown = [n for n in names if n not in MUTANTS]
+    if unknown:
+        raise SystemExit(f"unknown mutant(s) {unknown}; known: {', '.join(MUTANTS)}")
+    for name in names:          # "A+B" applies both
+        MUTANTS[name]()

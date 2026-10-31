@@ -49,6 +49,10 @@ class ToolCall(BaseModel):
     args: dict[str, Any] = {}
     seq: int = 0
     origin: Origin = Origin.PLANNER
+    # Set by the runtime, never by a planner: was untrusted content in the
+    # context when this call was proposed, and where did it come from?
+    tainted: bool = False
+    taint_sources: tuple[str, ...] = ()
 
 
 class ToolResult(BaseModel):
