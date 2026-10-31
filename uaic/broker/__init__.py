@@ -1,4 +1,4 @@
-from uaic.broker.capability import CapabilitySet, is_inside, resolve
+from uaic.broker.capability import CapabilitySet, canonical, is_inside, resolve
 from uaic.broker.manifest import (
     ManifestError,
     PluginManifest,
@@ -19,6 +19,7 @@ __all__ = [
     "PluginManifest",
     "Registry",
     "ToolSpec",
+    "canonical",
     "classify",
     "decide",
     "default_registry",

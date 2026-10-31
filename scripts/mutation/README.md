@@ -43,7 +43,9 @@ To run one weakening by hand:
 | `GATE_ALLOW`       | The GATE table: irreversible/high actions run without asking. |
 | `SILENT_TRUNC`     | Truncation notices: memory still cuts long entries but records nothing as dropped. |
 | `PROMPT_LEAK`      | The re-plan `prompt` carries the last failure note's text, as it did before the fix. |
-| `ASK_EVERY_STEP`   | Ask-once plan confirmation: every plan-level step is asked about separately. |
+| `BINDING_OFF`      | Confirmation binding, reverted: one plan-level "yes" covers every later plan-level call in the run. |
+| `PER_CALL`         | Stricter binding: a "yes" covers only the call shown in that dialog, not the rest of the approved plan. |
+| `ASK_EVERY_STEP`   | No binding at all: every plan-level dispatch is asked, retries included. |
 | `KEYWORD_FILTER`   | Adds a content filter to the **trusted** channel. The negative control must catch it, which proves the defences are provenance, not keywords. |
 | `PLUGINS_MISSING`  | The fs and mail plugins are not loaded. The "legitimately granted" controls must catch it, which proves every refusal was the broker's decision. |
 | `UNDO_OFF`         | The undo engine reports success and reverses nothing. |
@@ -51,9 +53,17 @@ To run one weakening by hand:
 ## Reading the residual tests
 
 Tests named `test_residual_*` record attacks that are **not** structurally
-defeated. Their mutant is the one that would *close* the gap. For example,
-`ASK_EVERY_STEP` makes the plan-confirmed-compensable-tool test go red,
-because the careful user is then asked and declines.
+defeated. Their mutant is the one that would *close* the gap, or break the
+remedy. For example, `UNDO_OFF` makes the frozen-reversible-tool test go red,
+because the injected delete then cannot be reversed.
+
+The binding mutants run against `tests/test_confirmation_binding.py` as well
+as the injection suite. Between them they pin the binding from both sides:
+`BINDING_OFF` and `PER_CALL` must not *loosen* or *tighten* it, and
+`ASK_EVERY_STEP` must not break the rule that a retry is not re-asked.
+
+`scripts/confirmation_cost.py` reuses `BINDING_OFF` and `PER_CALL` to measure
+the questions asked per completed task under each rule.
 
 `test_residual_poisoned_memory_*` has no mutant. Its only defence is a
 human reading the plan. The `attentive` and `rubber-stamp` variants are

@@ -24,7 +24,8 @@ SUITE = "tests/test_injection.py"
 MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (SUITE, "residual_poisoned_memory", ()),     # no code defence; see README
     (SUITE, "residual_injected_call_to_a_frozen_reversible", ("UNDO_OFF",)),
-    (SUITE, "residual_injected_call_to_a_plan_confirmed_compensable", ("ASK_EVERY_STEP",)),
+    (SUITE, "plan_confirmed_compensable_tool__git_commit__defeated_by_binding",
+     ("BINDING_OFF",)),
     (SUITE, "trusted_channel", ("KEYWORD_FILTER",)),
     (SUITE, "every_attack_target", ("PLUGINS_MISSING",)),
     (SUITE, "[loop-escalation]", ("ESCALATION_OFF",)),
@@ -43,6 +44,10 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (SUITE, "confirmation_is_not_required", ("GATE_ALLOW",)),
     ("tests/test_loop.py", "untrusted_error_text_never_reaches_the_planner",
      ("PROMPT_LEAK",)),
+    ("tests/test_confirmation_binding.py", "retry_of_the_same_failed_call", ("ASK_EVERY_STEP",)),
+    ("tests/test_confirmation_binding.py", "replan_keeps_is_covered", ("PER_CALL",)),
+    ("tests/test_confirmation_binding.py", "second_time_asks_again", ("BINDING_OFF",)),
+    ("tests/test_confirmation_binding.py", "user_never_saw", ("BINDING_OFF",)),
 ]
 
 
@@ -73,8 +78,9 @@ def run(nodeid: str, mutant: str) -> tuple[str, str]:
 
 def main() -> int:
     show = "--show" in sys.argv
-    nodeids = collect(SUITE) + [n for n in collect("tests/test_loop.py")
-                                if mutants_for(n) is not None]
+    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py",
+                                               "tests/test_confirmation_binding.py")
+                                for n in collect(path) if mutants_for(n) is not None]
     problems = 0
     for nodeid in nodeids:
         name = nodeid.split("::", 1)[1]

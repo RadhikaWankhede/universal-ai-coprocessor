@@ -28,7 +28,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from uaic.broker import CapabilitySet, default_registry
-from uaic.contracts import Decision, Plan, ToolCall, Verdict
+from uaic.contracts import Plan, ToolCall, Verdict
 from uaic.core.llm import PlannerError
 from uaic.core.memory import SessionMemory
 from uaic.journal import Status
@@ -86,28 +86,22 @@ class LoopReport:
         return "; ".join(parts)
 
 
-class _AskOncePerPlan:
-    """Wraps the user's confirmer so a plan-level question is asked once.
+class _CountingConfirmer:
+    """Wraps the user's confirmer to count the questions actually asked.
 
-    The executor is stateless across `run_one` calls by design, and the loop
-    drives it one step at a time so it can observe each result. Without this
-    wrapper the user would be asked the same plan-level question on every
-    compensable step, which is the fastest way to train someone to click yes.
+    Whether a question is asked at all is decided by the confirmation ledger
+    (binding.py). This used to be an ask-once-per-plan wrapper, which let any
+    plan-level call ride the first "yes" - including calls a re-plan added
+    after reading a document. That is what confirmation binding replaced.
     """
 
     def __init__(self, confirm: Confirmer) -> None:
         self._confirm = confirm
-        self._plan_confirmed = False
         self.asked = 0
 
     def __call__(self, call: ToolCall, verdict: Verdict) -> bool:
-        if verdict.decision is Decision.CONFIRM_PLAN and self._plan_confirmed:
-            return True
         self.asked += 1
-        answer = bool(self._confirm(call, verdict))
-        if answer and verdict.decision is Decision.CONFIRM_PLAN:
-            self._plan_confirmed = True
-        return answer
+        return bool(self._confirm(call, verdict))
 
 
 def always_decline(plan: Plan) -> None:
@@ -195,15 +189,17 @@ class AgentLoop:
         caps = freeze_plan(plan, granted, max_steps=self._budget(plan))
         report.caps = caps
 
-        asker = _AskOncePerPlan(self._confirm)
+        asker = _CountingConfirmer(self._confirm)
         executor = self._make_executor(asker)
+        # A plan-level "yes" covers the calls of THIS plan, as approved.
+        ledger = executor.ledger_for(plan.to_calls())
 
         pending: list[ToolCall] = list(plan.to_calls())
         attempts: dict[str, int] = {}
 
         while pending:
             call = pending.pop(0)
-            outcome = executor.run_one(call, caps)
+            outcome = executor.run_one(call, caps, ledger)
             report.steps.append(outcome)
             self._remember(outcome)
 

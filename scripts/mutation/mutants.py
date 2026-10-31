@@ -107,14 +107,31 @@ def prompt_leak() -> None:
     loop.replan_prompt = lambda failed, attempts: f"{last[0]}. Propose how to finish."
 
 
-def ask_every_step() -> None:
-    """Ask-once plan confirmation: every plan-level step is asked separately."""
-    import uaic.runtime.loop as loop
+def binding_off() -> None:
+    """Confirmation binding, reverted to the old rule: once any plan-level call
+    is confirmed, every later plan-level call in the run is covered."""
+    from uaic.runtime.binding import ConfirmationLedger
 
-    def ask(self, call, verdict):
-        self.asked += 1
-        return bool(self._confirm(call, verdict))
-    loop._AskOncePerPlan.__call__ = ask
+    def confirmed(self, call):
+        self.plan_confirmed = True
+    ConfirmationLedger.covers = lambda self, call: self.plan_confirmed
+    ConfirmationLedger.confirmed = confirmed
+
+
+def per_call() -> None:
+    """Stricter binding: a "yes" covers only the one call shown in that dialog,
+    never the rest of the approved plan."""
+    from uaic.runtime.binding import ConfirmationLedger
+
+    def confirmed(self, call):
+        self._authorised[self._sig(call)] += 1
+    ConfirmationLedger.confirmed = confirmed
+
+
+def ask_every_step() -> None:
+    """No binding at all: every plan-level dispatch is asked, retries included."""
+    from uaic.runtime.binding import ConfirmationLedger
+    ConfirmationLedger.covers = lambda self, call: False
 
 
 def keyword_filter() -> None:
@@ -146,7 +163,7 @@ def undo_off() -> None:
 MUTANTS = {fn.__name__.upper(): fn for fn in (
     escalation_off, freeze_off, undeclared_off, nonce_fixed, noted_trusted,
     observed_trusted, scope_off, no_resolve, gate_allow, silent_trunc, prompt_leak,
-    ask_every_step, keyword_filter, plugins_missing, undo_off)}
+    binding_off, per_call, ask_every_step, keyword_filter, plugins_missing, undo_off)}
 
 
 def pytest_configure(config) -> None:

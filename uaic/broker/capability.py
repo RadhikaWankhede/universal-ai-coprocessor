@@ -46,6 +46,15 @@ def _norm(p: Path) -> str:
     return os.path.normcase(str(p))
 
 
+def canonical(p: Path) -> str:
+    """The form in which two RESOLVED paths are compared.
+
+    Public so that anything else deciding whether two paths are the same -
+    confirmation binding, for one - agrees with the broker by construction.
+    """
+    return _norm(p)
+
+
 def is_inside(target: Path, root: Path) -> bool:
     """True if `target` lies within `root`. Both must already be resolved."""
     t, r = Path(_norm(target)), Path(_norm(root))
