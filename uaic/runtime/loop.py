@@ -25,8 +25,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from urllib.parse import quote
 
-from uaic.broker import CapabilitySet
+from uaic.broker import CapabilitySet, default_registry
 from uaic.contracts import Decision, Plan, ToolCall, Verdict
 from uaic.core.llm import PlannerError
 from uaic.core.memory import SessionMemory
@@ -114,6 +115,38 @@ def always_decline(plan: Plan) -> None:
     return None
 
 
+def source_of(call: ToolCall) -> str:
+    """Where a result came from: the call's first scoped path, and its tool.
+
+    Both parts are plan-supplied, and this string is rendered inside the
+    opening <untrusted> tag. So it is built percent-encoded - `as_uri()` and
+    `quote()` both escape quotes and angle brackets - and a hostile path or
+    tool name cannot close the attribute and forge another one.
+    """
+    tool = quote(call.tool, safe="._-")
+    spec = default_registry().lookup(call.tool)
+    for arg in spec.scope_args if spec else ():
+        value = call.args.get(arg)
+        if isinstance(value, str) and value:
+            path = Path(value)
+            target = path.as_uri() if path.is_absolute() else quote(value, safe="/._-")
+            return f"{target}#{tool}"
+    return f"tool:{tool}"
+
+
+def replan_prompt(failed: ToolCall, attempts: int) -> str:
+    """The instruction for a re-plan, built ONLY from trusted parts.
+
+    `prompt` is a field a planner may reasonably read as instruction, so the
+    failing tool's error text must never be placed in it: errors quote what
+    failed, and that can be a file or a program's output. The error reaches
+    the planner through memory instead, as an untrusted-wrapped note. The tool
+    name is safe here because only a declared tool can have run and failed.
+    """
+    return (f"The step {failed.tool} failed {attempts} time(s); its error is in "
+            f"the context above. Propose how to finish the original request.")
+
+
 class AgentLoop:
     def __init__(self, planner, executor_factory: Callable[[Confirmer], Executor],
                  *,
@@ -147,7 +180,7 @@ class AgentLoop:
                                          context=self.memory.context())
         except PlannerError as exc:
             report.message = str(exc)
-            self.memory.noted(f"planning failed: {exc}")
+            self.memory.noted(f"planning failed: {exc}", source_ref=f"planner:{plan_id}")
             return report
 
         report.plan = plan
@@ -156,7 +189,7 @@ class AgentLoop:
         if granted is None:
             report.outcome = Outcome.DECLINED
             report.message = "the user did not approve the plan"
-            self.memory.noted("the user declined the plan")
+            self.memory.noted("the user declined the plan", source_ref=f"runtime:{plan_id}")
             return report
 
         caps = freeze_plan(plan, granted, max_steps=self._budget(plan))
@@ -223,13 +256,15 @@ class AgentLoop:
         return len(plan.steps) * (1 + self._max_replans) + STEP_HEADROOM
 
     def _remember(self, outcome: StepOutcome) -> None:
+        source = source_of(outcome.call)
         if outcome.ran and outcome.result.ok:
-            self.memory.observed(outcome.call.tool, outcome.result.payload)
+            self.memory.observed(outcome.call.tool, outcome.result.payload, source)
         elif outcome.ran:
-            self.memory.noted(f"{outcome.call.tool} failed: {outcome.result.error}")
+            self.memory.noted(f"{outcome.call.tool} failed: {outcome.result.error}",
+                              source_ref=source)
         else:
             rule = outcome.verdict.rule_ids[0] if outcome.verdict.rule_ids else "?"
-            self.memory.noted(f"{outcome.call.tool} was refused ({rule})")
+            self.memory.noted(f"{outcome.call.tool} was refused ({rule})", source_ref=source)
 
     def _replan(self, report: LoopReport, caps: CapabilitySet, plan: Plan,
                 failed: StepOutcome) -> list[ToolCall] | None:
@@ -247,11 +282,10 @@ class AgentLoop:
         # and returned a result. Refusals return before this point, so there
         # is no branch here for them - an unreachable else would just be dead
         # code pretending to be caution.
-        error = failed.result.error
+        attempts = sum(1 for s in report.steps if s.call.seq == failed.call.seq)
         try:
             revised = self._planner.propose(
-                f"The step {failed.call.tool} failed: {error}. "
-                f"Propose how to finish the original request.",
+                replan_prompt(failed.call, attempts),
                 f"{plan.plan_id}-r{report.replans + 1}",
                 context=self.memory.context())
         except PlannerError as exc:
@@ -270,13 +304,17 @@ class AgentLoop:
             report.escalation = needed
             report.message = ("the revised plan needs tools that were not "
                               f"approved: {sorted(needed)}")
-            self.memory.noted(f"escalation required for {sorted(needed)}")
+            self.memory.noted(f"escalation required for {sorted(needed)}",
+                              source_ref=f"planner:{revised.plan_id}")
             return None
 
         # The revised steps run under the EXISTING capability set, and are
         # journalled under the existing plan id so the audit trail stays one
-        # story rather than two.
-        offset = len(report.steps)
+        # story rather than two. They continue from the highest step NUMBER
+        # used so far, not from the count of outcomes: a retry reuses its
+        # step's number, so counting outcomes would let retries eat budget
+        # meant for steps.
+        offset = max(s.call.seq for s in report.steps)
         return [c.model_copy(update={"plan_id": caps.plan_id,
                                      "seq": offset + i + 1,
                                      "call_id": f"{caps.plan_id}-replan{report.replans}"

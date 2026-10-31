@@ -91,7 +91,7 @@ class SessionMemory:
         return self._add("tool_result", f"{tool} -> {payload}",
                          Provenance.UNTRUSTED, source_ref)
 
-    def noted(self, text: str) -> SessionMemory:
+    def noted(self, text: str, *, source_ref: str | None = None) -> SessionMemory:
         """A note the runtime writes about itself - a refusal, a failure.
 
         Always untrusted, and there is no argument to make it otherwise.
@@ -105,8 +105,11 @@ class SessionMemory:
         call site rather than by construction. The keyword is gone. If a
         trusted system note is ever genuinely needed, it should arrive as its
         own named method, so that the exception is visible in the API.
+
+        `source_ref` says where the note's content came from. It is a label,
+        not a trust level: it cannot change the provenance.
         """
-        return self._add("note", text, Provenance.UNTRUSTED)
+        return self._add("note", text, Provenance.UNTRUSTED, source_ref)
 
     def remember_fact(self, key: str, value: str) -> SessionMemory:
         """A durable preference stated by the USER. Never inferred from a file."""
