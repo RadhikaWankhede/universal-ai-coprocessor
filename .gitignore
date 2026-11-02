@@ -1,13 +1,26 @@
+# Python
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
-*.db
-.uaic/
-*.sqlite3
-.env
-.DS_Store
+dist/
+build/
+
+# Editors / OS
 .vscode/
-week14-16_documents.zip
+.DS_Store
+
+# Project data and secrets (never commit)
+.env
+.uaic/
+*.db
+*.sqlite3
+*.zip
 eval/out/
+
+# Desktop voice models and ML artifacts (large, downloaded, not source)
+desktop/models/
+vosk-model-*/
+*.onnx
+*.pt
