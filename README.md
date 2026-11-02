@@ -5,86 +5,96 @@ for natural-language desktop automation on Windows.
 
 ## What it does
 
-The user types a request in plain English ("organise my Downloads and summarise
-the PDFs"). An LLM turns that into an ordered list of proposed tool calls. Every
-single call is then checked by a Capability Broker before it can touch the
-machine, recorded in an append-only journal before it runs, and can be undone
-afterwards.
+You type a request in plain English ("organise my Downloads and summarise the
+PDFs"). An LLM turns it into an ordered list of proposed tool calls. Every
+single call is then checked by a **Capability Broker** before it can touch the
+machine, recorded in an **append-only journal** before it runs, and can be
+**undone** afterwards.
 
-## The contribution — read this before changing anything
+## The contribution
 
-The project's novelty is NOT that an agent can act on a computer. It is:
+The novelty is not that an agent can act on a computer. It is:
 
 1. **Reversibility drives confirmation policy.** Actions are classified by
    whether they can be undone (reversible / compensable / irreversible), not by
    how dangerous they sound. Only irreversible actions block for confirmation.
-   Reversibility is a property of the *implementation* — routing delete to a
-   trash folder makes it reversible, which removes a prompt without reducing
-   safety.
+   Reversibility is a property of the *implementation*: routing delete to a
+   trash folder makes it reversible, removing a prompt without reducing safety.
 
-2. **The capability freeze includes the TOOL SET, not just paths.** When the
-   user approves a plan, `CapabilitySet.tools` is frozen. If a poisoned PDF
+2. **The capability freeze includes the tool set, not just paths.** When you
+   approve a plan, `CapabilitySet.tools` is frozen. If a poisoned PDF later
    convinces the planner to call `mail.send` and that tool was not in the
-   approved plan, the broker denies it — regardless of how persuasive the
-   injected text was. This is the structural defence against indirect prompt
-   injection.
+   approved plan, the broker denies it — however persuasive the injected text.
+   This is the structural defence against indirect prompt injection, layered
+   with confirmation binding and taint-based gate escalation (see
+   `tests/test_injection.py` and `eval/`).
 
-3. **Four metrics reported together:** task success, attack success,
-   false-block rate, confirmations per task.
+3. **Measured, not asserted.** The evaluation harness reports task success,
+   containment, interruption (confirmations per completed task) and recovery,
+   across an ablation of the defence layers. Attack success is read from the
+   journal — whether a dangerous call was actually *dispatched* — never from
+   what the model said.
 
-## Architecture
+## Requirements and install
 
-    uaic/contracts/   ToolCall, ToolResult, Verdict, enums. A LEAF — imports
-                      nothing else from uaic. Everything imports it.
-    uaic/broker/      The Capability Broker. Pure functions. No I/O, no model.
-    uaic/journal/     Action Journal (SQLite, WAL, append-only trigger) + Undo.
-    uaic/plugins/     fs, shell_git, documents, browser. Each returns ToolResult.
-    uaic/core/        Planner, memory, context assembly. Uses the LLM.
-    uaic/runtime/     Wiring and the execution loop.
-    uaic/server/      FastAPI + SSE (not built yet).
-    tests/            pytest. Table-driven where possible.
+- Windows, Python 3.13 (the project targets 3.12+). It is launched as `py` on
+  the development machine.
+- A virtualenv at `.venv`.
 
-The broker pipeline: validate → normalise → scope → classify → gate → journal.
-Stages 1–5 are pure, which is why the decision layer is exhaustively testable
-without a language model.
+```
+py -m venv .venv
+.venv\Scripts\activate
+py -m pip install -r requirements.txt
+```
 
-## Hard rules
+No API key is needed to run the tests, the evaluation harness or the scripts.
+Only the live planner (Google Gemini, behind the `Planner` protocol) needs one,
+via the `UAIC_GEMINI_API_KEY` environment variable.
 
-- **Never weaken a security check.** In particular `resolve()` in
-  `broker/capability.py` must always resolve before containment is tested.
-  Removing `.resolve()` silently lets `..` traversal through.
-- **Never edit a test to make it pass.** Report the failure instead.
-- `uaic/core/` must never import `uaic/plugins/`. Enforced by
-  `tests/test_architecture.py`.
-- `uaic/contracts/` imports nothing else from `uaic`.
-- The GATE table in `broker/pipeline.py` stays literal data, not if/else logic.
-- Escalation rules are registered Python predicates, never strings passed to
-  `eval()`. The manifest must never be a code-execution path.
-- `mail.send` is ALWAYS a stub that writes to a local file. Never send real
-  email — the injection tests would exfiltrate for real.
-- Attack success is measured from the journal (was a dangerous call
-  *dispatched*), never from model output.
-- Run `pytest` before every commit.
+## Running it
 
-## Conventions
+There is no end-user entry point yet: the LLM planner adapter and the HTTP/SSE
+server are the next pieces. Today the system is exercised through its test
+suite and the evaluation harness.
 
-- Python 3.13, launched with `py` on this machine. Virtualenv at `.venv`.
-- Pydantic v2 for all contracts. `model_config = ConfigDict(frozen=True)` on
-  anything that must not change after creation.
-- Target platform is Windows: use `pathlib` plus `os.path.normcase`, and watch
-  for 8.3 short names, drive letters and alternate data streams.
-- SQLite with `PRAGMA journal_mode=WAL`. No ORM — the schema is part of the
-  contribution.
-- Evaluation results go to flat files and pandas, never into the journal DB.
-- No MCP transport yet. Manifests are internal; say so honestly in the report.
+```
+py -m pytest            # the full suite (~400 tests, 1 skipped where symlinks are unavailable)
+py -m ruff check .      # lint; must be clean
+py eval/harness.py      # run the task corpus and print the metrics table
+```
+
+## Layout
+
+```
+uaic/contracts/   ToolCall, ToolResult, Verdict, Plan, enums. A leaf: imports
+                  nothing else from uaic. Everything imports it.
+uaic/broker/      The Capability Broker and the YAML tool manifests. Pure
+                  functions: no I/O, no model. validate → normalise → scope →
+                  classify → gate → journal.
+uaic/journal/     Action Journal (SQLite, WAL, append-only trigger) + Undo.
+uaic/plugins/     fs, git, terminal, documents — each returns a ToolResult.
+uaic/core/        Planner protocol, Gemini adapter, memory, context assembly.
+uaic/runtime/     The execution loop, capability freeze, confirmation binding,
+                  taint propagation.
+tests/            pytest; table-driven where possible.
+eval/             The evaluation harness and task corpus (see eval/README.md).
+scripts/          injection_report.py, confirmation_cost.py, and the mutation
+                  harness that proves each defence test can fail.
+```
+
+## Evaluation
+
+`eval/` holds the quantitative results. `eval/corpus.json` is the task corpus
+(data, not tests); `eval/harness.py` runs it through the real loop, broker,
+journal and plugins and emits a table plus JSON/CSV/LaTeX. See
+`eval/README.md` for the metrics and the ablation.
 
 ## Status
 
-Everything except the LLM adapter and the remaining plugins is built and
-tested: contracts, Plan, Capability Broker, capability freeze, Action Journal,
-Undo Engine, filesystem plugin with trash-backed delete, runtime execution
-loop, context trust boundary, manifest-derived tool schemas. 167 tests, ruff
-clean, no API key required to run any of them.
+Built and tested: contracts, Plan, Capability Broker, capability freeze, Action
+Journal, Undo Engine, the fs/git/terminal/documents plugins, the runtime
+execution loop, the context trust boundary, manifest-derived tool schemas,
+confirmation binding, taint propagation and gate escalation, the Gemini planner
+behind the `Planner` protocol, and the evaluation harness. ruff clean.
 
-Next: the LLM adapter behind the Planner protocol (needs a provider and an
-API key), then the documents plugin for PDF extraction.
+Next: wiring the live planner end to end, and the FastAPI + SSE server.
