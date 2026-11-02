@@ -18,6 +18,7 @@ schemas the broker validates against.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,10 @@ from uaic.core.llm import (
 )
 
 API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
-DEFAULT_MODEL = "gemini-2.0-flash"
+# A stable alias, not a pinned version: gemini-2.0-flash was retired out from
+# under us (404), so pin to the moving "latest" alias and let UAIC_GEMINI_MODEL
+# override it when a specific or less-loaded model is wanted.
+DEFAULT_MODEL = "gemini-flash-latest"
 ENV_KEY = "UAIC_GEMINI_API_KEY"
 ENV_MODEL = "UAIC_GEMINI_MODEL"
 
@@ -105,7 +109,7 @@ class GeminiPlanner:
                  timeout: int = DEFAULT_TIMEOUT,
                  max_steps: int = MAX_STEPS) -> None:
         self._given_key = api_key_value
-        self._model = model or DEFAULT_MODEL
+        self._model = model or os.environ.get(ENV_MODEL) or DEFAULT_MODEL
         self._registry = registry or default_registry()
         self._transport = transport
         self._timeout = timeout
