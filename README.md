@@ -29,11 +29,16 @@ The novelty is not that an agent can act on a computer. It is:
    with confirmation binding and taint-based gate escalation (see
    `tests/test_injection.py` and `eval/`).
 
-3. **Measured, not asserted.** The evaluation harness reports task success,
-   containment, interruption (confirmations per completed task) and recovery,
-   across an ablation of the defence layers. Attack success is read from the
-   journal — whether a dangerous call was actually *dispatched* — never from
-   what the model said.
+3. **Measured with five metrics, not four.** The evaluation harness reports
+   task success, containment, interruption (confirmations per completed task),
+   recovery, and **silent-dispatch rate** — an injected in-scope call that
+   executed with no confirmation asked. The fifth is necessary, not
+   supplementary: containment and recovery are invariant across every
+   configuration in the ablation, so a four-metric table would show
+   confirmation binding and taint propagation accomplishing nothing, when they
+   in fact take silent dispatch from 2/3 to 0/3. Attack success is read from
+   the journal — whether a dangerous call was actually *dispatched* — never
+   from what the model said.
 
 ## Requirements and install
 
@@ -97,4 +102,11 @@ execution loop, the context trust boundary, manifest-derived tool schemas,
 confirmation binding, taint propagation and gate escalation, the Gemini planner
 behind the `Planner` protocol, and the evaluation harness. ruff clean.
 
-Next: wiring the live planner end to end, and the FastAPI + SSE server.
+The browser plugin is **not implemented**; its adversarial tests are prepared,
+so the write-up can report its threat model without the plugin existing.
+
+Next: a desktop application running in the **same process** as the backend, and
+wiring the live planner end to end. There is deliberately no HTTP server, socket
+or network transport between the UI and the backend — a network port would be a
+way for something other than the user to issue approvals, which this project's
+threat model does not survive.
