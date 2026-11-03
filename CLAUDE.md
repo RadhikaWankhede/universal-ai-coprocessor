@@ -44,7 +44,7 @@ as security changes.
 
 ## Conventions
 
-- Python 3.13, launched as `py`; virtualenv at `.venv`.
+- Python 3.12 or later (the development machine uses 3.14), launched as `py`; virtualenv at `.venv`.
 - Pydantic v2 for all contracts; `model_config = ConfigDict(frozen=True)` on
   anything that must not change after creation.
 - Target platform is Windows: use `pathlib` plus `os.path.normcase`, and watch

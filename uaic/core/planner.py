@@ -9,10 +9,12 @@ from collections.abc import Sequence
 from typing import Protocol
 
 from uaic.contracts import Plan, PlanStep
+from uaic.core.context import ContextAssembler
 
 
 class Planner(Protocol):
-    def propose(self, prompt: str, plan_id: str) -> Plan: ...
+    def propose(self, prompt: str, plan_id: str,
+                context: ContextAssembler | None = None) -> Plan: ...
 
 
 class ScriptedPlanner:
@@ -26,7 +28,8 @@ class ScriptedPlanner:
         self._summary = summary
         self._paths = tuple(requested_paths)
 
-    def propose(self, prompt: str, plan_id: str) -> Plan:
+    def propose(self, prompt: str, plan_id: str,
+                context: ContextAssembler | None = None) -> Plan:
         return Plan(plan_id=plan_id, prompt=prompt, steps=self._steps,
                     summary=self._summary, requested_paths=self._paths)
 

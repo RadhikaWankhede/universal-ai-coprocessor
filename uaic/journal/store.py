@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,21 @@ class ActionJournal:
             (_now(), status, inverse, result_hash or result.result_hash,
              result.provenance.value, result.error),
         )
+
+    def write_grants(self, plan_id: str, paths: Sequence[Path | str]) -> None:
+        """Record the folders the user granted this plan, at the freeze."""
+        try:
+            self._conn.execute(
+                "INSERT INTO plan_grants (plan_id, ts, paths_json) VALUES (?,?,?)",
+                (plan_id, _now(), json.dumps([str(p) for p in paths])))
+        except sqlite3.IntegrityError as exc:
+            raise JournalError(f"grants for {plan_id!r} already recorded") from exc
+
+    def grants(self, plan_id: str) -> tuple[str, ...] | None:
+        """The folders granted to a plan; None if none were recorded for it."""
+        row = self._conn.execute("SELECT paths_json FROM plan_grants WHERE plan_id = ?",
+                                 (plan_id,)).fetchone()
+        return tuple(json.loads(row["paths_json"])) if row else None
 
     def mark_undone(self, call_id: str) -> None:
         self._update(call_id, "status = ?, ts_outcome = ?", (Status.UNDONE, _now()))

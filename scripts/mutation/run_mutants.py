@@ -22,6 +22,7 @@ B = "tests/test_confirmation_binding.py"
 T = "tests/test_taint.py"
 P = "tests/test_progress.py"
 F = "tests/test_fs_batch.py"
+U = "tests/test_undo_brokered.py"
 
 # (file, substring of the test id) -> the mutants to run. Each must turn the
 # test RED, unless written "NAME=GREEN": that records an attack with two
@@ -80,6 +81,10 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (F, "destination_must_be_inside", ("SCOPE_OFF",)),
     (F, "source_folder_must_be_inside", ("SCOPE_OFF",)),
     (F, "cannot_climb_above_the_grant", ("SCOPE_OFF",)),
+    (U, "outside_the_grant_is_refused", ("UNDO_UNBROKERED",)),
+    (U, "is_journalled", ("UNDO_UNBROKERED",)),
+    (U, "declined_inverse_does_not_run", ("UNDO_UNBROKERED",)),
+    (U, "wrong_type_is_refused", ("ARG_TYPES_OFF",)),
 ]
 
 
@@ -110,7 +115,7 @@ def run(nodeid: str, mutant: str) -> tuple[str, str]:
 
 def main() -> int:
     show = "--show" in sys.argv
-    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T, P, F)
+    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T, P, F, U)
                                 for n in collect(path) if mutants_for(n) is not None]
     problems = 0
     for nodeid in nodeids:

@@ -6,8 +6,8 @@ about it. It says what the system is, how it works, what the evidence shows,
 which claims the evidence supports and which it does not. Read it before writing
 code or prose.
 
-**State as of 2026-11-04:** 553 tests collected, 553 passing. `ruff check .`
-clean. The mutation harness reports 0 problems across 25 mutants. The
+**State as of 2026-11-04:** 562 tests collected, 562 passing. `ruff check .`
+clean. The mutation harness reports 0 problems across 27 mutants. The
 evaluation harness numbers are unchanged from the original ablation (§5.3).
 Final-year capstone (CSE-AIDS, 2026–27).
 
@@ -167,7 +167,7 @@ can be read, summarised and spoken aloud, but it cannot cause an action.
 | `uaic/app/` | 730 | Session (composition root), run records, the backend thread. |
 | `uaic/surface.py` | — | The **only** module a UI may import (enforced by a test). |
 | `uaic/desktop/` | 1396 | PySide6 window, dialogs, offline speech in/out, spoken-form cleanup. |
-| `tests/` | 7184 | pytest, 553 tests. |
+| `tests/` | 7365 | pytest, 562 tests. |
 | `eval/` | — | Task corpus (data), harness, README. |
 | `scripts/` | — | Injection report, mutation harness, live checks, packaging, speech evaluation. |
 
@@ -209,7 +209,10 @@ write, the action does not happen (`RT.NOT_JOURNALLED`). **Guarantee: an
 action that is not in the journal did not occur.** Append-only is enforced by
 `BEFORE UPDATE` and `BEFORE DELETE` triggers in `schema.sql`. Undo replays the
 journal backwards and stops at the first irreversible step rather than skipping
-past it.
+past it. In the app, each inverse goes through the broker and the journal under
+the plan's own granted folders (recorded at the freeze), and may ask the user;
+it is journalled under `undo:<plan_id>`. The evaluation harness replays inverses
+directly on the plugins, so its recovery number does not measure that path.
 
 The journal stores no tool output, only a hash. What a step returned (shown in
 the app's history) is kept in a separate `records.db`, which the user may
@@ -318,14 +321,14 @@ reads. No attack has been run against the live model, which is the main caveat.
 
 ### 5.2 The mutation harness (`py scripts/mutation/run_mutants.py`)
 
-It defines 25 mutants, each removing one defence in the running test process,
+It defines 27 mutants, each removing one defence in the running test process,
 such as: path resolution before containment; scope; the GATE table; the tool
 freeze; the declared-tool check; the nonce; provenance of notes and results;
 truncation notices; confirmation binding; taint escalation and propagation;
 undo; cancellation safe points; progress isolation; and the bulk-move
 undo-record check.
 
-The harness runs 69 test × mutant pairs. Every mapped defence test turns
+The harness runs 73 test × mutant pairs. Every mapped defence test turns
 **red** when its defence is removed. Two pairs are expected to stay green:
 binding alone is removed while taint still stops the attack, which records two
 independent defences. **Result: 0 problems.** No defence test passes vacuously.
@@ -438,7 +441,9 @@ The fix was a new tool in the action space, not a change to the loop:
   - **All or nothing:** any name clash moves nothing, and a failure part-way
     through moves back what had already moved.
   - **Limit:** 500 files per step.
-  - **Undo record:** each move writes a batch record of exactly what moved.
+  - **Undo record:** each move writes a batch record of exactly what moved. Undo
+    moves the files back and leaves the destination folder in place, even if the
+    move created it.
 - **`fs.restore_batch`**, its inverse, treats that on-disk record as
   **untrusted input**.
   - **Validation:** every entry must leave from the record's destination folder
@@ -500,10 +505,9 @@ measurement.
   runs the full loop on a throwaway sandbox.
   - **Before the planning guide:** "move all the Word files…" and "move all the
     .jpg files…" produced listing-only plans.
-  - **After it:** in a plan-only check, all five requests tried (Word, WordDoc,
-    photos, spreadsheets and a folder move) produced correct
-    `fs.move_matching` and `fs.move` plans.
-  - **Caveat:** that is n = 5, a qualitative check and not a benchmark.
+  - **After it:** in a plan-only check, all four requests tried (Word, WordDoc,
+    photos and spreadsheets) produced correct `fs.move_matching` plans.
+  - **Caveat:** that is n = 4, a qualitative check and not a benchmark.
 
 ---
 
@@ -566,11 +570,11 @@ safety claim is about one sample rather than the system.
 
 | Claim | Command | Output |
 |---|---|---|
-| 553 tests pass | `py -m pytest` | stdout |
+| 562 tests pass | `py -m pytest` | stdout |
 | Lint clean | `py -m ruff check .` | stdout |
 | 39 injection rows, 2 got through | `py scripts/injection_report.py` | stdout table |
 | Ablation table (§5.3) | `py eval/harness.py` | stdout, plus `eval/out/results.{json,csv,tex}` (the `.tex` is paper-ready) |
-| 25 mutants, 0 problems | `py scripts/mutation/run_mutants.py` | stdout |
+| 27 mutants, 0 problems | `py scripts/mutation/run_mutants.py` | stdout |
 | Confirmation cost | `py scripts/confirmation_cost.py` | stdout |
 | Live planner works | `py scripts/live_check.py`, `py scripts/live_e2e.py` | stdout (needs key) |
 | Build is whole | `py scripts/build_desktop.py --with-model --verify` | self-test JSON |
@@ -674,7 +678,7 @@ This project's distinct angles are:
 
 ```
 .venv\Scripts\activate
-py -m pytest                             # 553 pass
+py -m pytest                             # 562 pass
 py -m ruff check .                       # clean
 py scripts/injection_report.py           # attack table
 py eval/harness.py                       # ablation (+ LaTeX in eval/out/)

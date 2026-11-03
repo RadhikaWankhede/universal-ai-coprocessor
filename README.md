@@ -45,7 +45,7 @@ The novelty is not that an agent can act on a computer. It is:
 
 ## Requirements and install
 
-- Windows, Python 3.13 (the project targets 3.12+). It is launched as `py` on
+- Windows, Python 3.12 or later (the development machine uses 3.14). It is launched as `py` on
   the development machine.
 - A virtualenv at `.venv`.
 
@@ -227,7 +227,7 @@ The app (PySide6) covers:
 - PyInstaller packaging.
 
 Bulk pattern moves and folder tools have exact undo, and the planner gets a
-planning guide. 553 tests pass, ruff is clean, and the mutation harness reports
+planning guide. 562 tests pass, ruff is clean, and the mutation harness reports
 0 problems. The design, results and limitations are in
 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 

@@ -210,6 +210,7 @@ class AgentLoop:
 
         asker = _CountingConfirmer(self._confirm)
         executor = self._make_executor(asker)
+        executor.record_grants(caps)
         # A plan-level "yes" covers the calls of THIS plan, as approved.
         ledger = executor.ledger_for(plan.to_calls())
 

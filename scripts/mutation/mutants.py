@@ -225,12 +225,26 @@ def record_unchecked() -> None:
         (Path(m["dst"]), Path(m["src"])) for m in record["moves"]]
 
 
+def undo_unbrokered() -> None:
+    """Undo goes straight to the plugin, past the broker and the journal."""
+    from uaic.app.session import Session
+    Session._undo_call = lambda self, plan_id, call: self._plugins[
+        call.tool.split(".", 1)[0]](call)
+
+
+def arg_types_off() -> None:
+    """The broker's argument-type check: any value is accepted for any argument."""
+    import uaic.broker.pipeline as pipeline
+    pipeline._wrong_types = lambda spec, args: []
+
+
 MUTANTS = {fn.__name__.upper(): fn for fn in (
     escalation_off, freeze_off, undeclared_off, nonce_fixed, noted_trusted,
     observed_trusted, scope_off, no_resolve, gate_allow, silent_trunc, prompt_leak,
     binding_off, per_call, ask_every_step, taint_off, stamp_off, results_only_taint,
     keyword_filter, plugins_missing, undo_off, cancel_dispatch_off, cancel_loop_off,
-    progress_live_args, progress_raises, record_unchecked)}
+    progress_live_args, progress_raises, record_unchecked, undo_unbrokered,
+    arg_types_off)}
 
 
 def pytest_configure(config) -> None:

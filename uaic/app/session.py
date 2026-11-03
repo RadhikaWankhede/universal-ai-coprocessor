@@ -25,8 +25,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from uaic.app.records import RunRecords
-from uaic.broker import default_registry
-from uaic.contracts import Plan, Rev, Risk, ToolCall, ToolResult
+from uaic.broker import CapabilitySet, default_registry
+from uaic.contracts import Origin, Plan, Rev, Risk, ToolCall, ToolResult
 from uaic.core import GeminiPlanner, HttpTransport, LLMError, SessionMemory
 from uaic.core.gemini import ENV_KEY
 from uaic.core.llm import api_key
@@ -45,6 +45,7 @@ from uaic.runtime import (
 from uaic.runtime.executor import PluginExecute
 from uaic.runtime.loop import Approver, Confirmer
 
+UNDO_PREFIX = "undo:"   # journal plan ids of undo runs, kept out of the history list
 PLANNER_TIMEOUT = 120   # seconds per attempt; the live flash model is sometimes slow
 
 
@@ -262,14 +263,46 @@ class Session:
     # ----------------------------------------------------------------- undo
 
     def undo(self, plan_id: str) -> UndoReport:
-        return UndoEngine(self.journal, self._dispatch).undo_plan(plan_id)
+        return UndoEngine(self.journal,
+                          lambda call: self._undo_call(plan_id, call)).undo_plan(plan_id)
 
-    def _dispatch(self, call: ToolCall) -> ToolResult:
-        plugin = self._plugins.get(call.tool.split(".", 1)[0])
-        if plugin is None:
-            return ToolResult(call_id=call.call_id, ok=False,
-                              error=f"no plugin is loaded for {call.tool}")
-        return plugin(call)
+    def _undo_grants(self, plan_id: str) -> tuple[str, ...]:
+        """What the user approved for this plan. A plan from before grants were
+        recorded falls back to the paths its own executed steps were admitted on."""
+        granted = self.journal.grants(plan_id)
+        if granted is not None:
+            return granted
+        registry = default_registry()
+        paths: list[str] = []
+        for row in self.journal.rows(plan_id, status=Status.EXECUTED):
+            spec = registry.lookup(row.tool)
+            for arg in spec.scope_args if spec else ():
+                if isinstance(row.args.get(arg), str):
+                    paths.append(row.args[arg])
+        return tuple(paths)
+
+    def _undo_call(self, plan_id: str, call: ToolCall) -> ToolResult:
+        """Run one inverse like any other call: broker, confirmation, journal, plugin.
+
+        It is judged against the plan's own granted folders and may use only its
+        own tool, so a recorded inverse cannot reach anywhere the user did not
+        approve. It is journalled under `undo:<plan_id>`: a row under the plan's
+        own id would look like a forward step and be replayed by a second undo.
+        """
+        undo_id = f"{UNDO_PREFIX}{plan_id}"
+        brokered = call.model_copy(update={
+            "plan_id": undo_id,
+            "call_id": f"undo-{uuid.uuid4().hex[:12]}",   # a failed undo can be retried
+            "origin": Origin.UNDO})
+        caps = CapabilitySet(plan_id=undo_id, tools=frozenset({call.tool}),
+                             path_grants=tuple(Path(p) for p in self._undo_grants(plan_id)),
+                             max_steps=call.seq + 1)
+        executor = Executor(self.journal, self._plugins, confirm=self._confirm)
+        outcome = executor.run_one(brokered, caps)
+        if outcome.result is not None:
+            return outcome.result
+        why = "; ".join(outcome.verdict.reasons) or outcome.status
+        return ToolResult(call_id=brokered.call_id, ok=False, error=f"{outcome.status}: {why}")
 
     # -------------------------------------------------------------- history
 
@@ -281,6 +314,8 @@ class Session:
         their journal rows remain as the audit trail."""
         grouped: dict[str, list[JournalRow]] = {}
         for row in self.journal.rows():
+            if row.plan_id.startswith(UNDO_PREFIX):
+                continue
             grouped.setdefault(row.plan_id, []).append(row)
         records = self.records.plans()
         cleared = self.records.cleared_at()
