@@ -6,7 +6,7 @@ about it. It says what the system is, how it works, what the evidence shows,
 which claims the evidence supports and which it does not. Read it before writing
 code or prose.
 
-**State as of 2026-11-04:** 552 tests collected, 552 passing. `ruff check .`
+**State as of 2026-11-04:** 553 tests collected, 553 passing. `ruff check .`
 clean. The mutation harness reports 0 problems across 25 mutants. The
 evaluation harness numbers are unchanged from the original ablation (§5.3).
 Final-year capstone (CSE-AIDS, 2026–27).
@@ -167,7 +167,7 @@ can be read, summarised and spoken aloud, but it cannot cause an action.
 | `uaic/app/` | 730 | Session (composition root), run records, the backend thread. |
 | `uaic/surface.py` | — | The **only** module a UI may import (enforced by a test). |
 | `uaic/desktop/` | 1396 | PySide6 window, dialogs, offline speech in/out, spoken-form cleanup. |
-| `tests/` | 7184 | pytest, 552 tests. |
+| `tests/` | 7184 | pytest, 553 tests. |
 | `eval/` | — | Task corpus (data), harness, README. |
 | `scripts/` | — | Injection report, mutation harness, live checks, packaging, speech evaluation. |
 
@@ -566,7 +566,7 @@ safety claim is about one sample rather than the system.
 
 | Claim | Command | Output |
 |---|---|---|
-| 552 tests pass | `py -m pytest` | stdout |
+| 553 tests pass | `py -m pytest` | stdout |
 | Lint clean | `py -m ruff check .` | stdout |
 | 39 injection rows, 2 got through | `py scripts/injection_report.py` | stdout table |
 | Ablation table (§5.3) | `py eval/harness.py` | stdout, plus `eval/out/results.{json,csv,tex}` (the `.tex` is paper-ready) |
@@ -674,7 +674,7 @@ This project's distinct angles are:
 
 ```
 .venv\Scripts\activate
-py -m pytest                             # 552 pass
+py -m pytest                             # 553 pass
 py -m ruff check .                       # clean
 py scripts/injection_report.py           # attack table
 py eval/harness.py                       # ablation (+ LaTeX in eval/out/)

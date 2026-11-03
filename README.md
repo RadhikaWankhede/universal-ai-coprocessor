@@ -165,9 +165,11 @@ py scripts/build_desktop.py --with-model --verify
 ```
 
 This builds `dist\UAIC\UAIC.exe` (a one-folder build) and copies the speech
-models in `desktop\models\` (Whisper and/or Vosk) next to it. It then runs the exe's `--self-test` to prove the manifests, the
-journal schema and the speech pieces made it into the bundle. The API key is
-never bundled.
+models in `desktop\models\` (Whisper and/or Vosk) next to it. It then runs the
+exe's `--self-test`, which proves that the manifests, the journal schema and the
+speech engine made it into the bundle. The test loads the Whisper model and runs
+it on one second of silence. The API key is never bundled. With both models, the
+folder is about 930 MB.
 
 ## Layout
 
@@ -179,7 +181,10 @@ uaic/broker/      The Capability Broker and the YAML tool manifests. Pure
                   classify → gate → journal.
 uaic/journal/     Action Journal (SQLite, WAL, append-only trigger) + Undo.
 uaic/plugins/     fs, git, terminal, documents — each returns a ToolResult.
-uaic/core/        Planner protocol, Gemini adapter, memory, context assembly.
+                  fs includes one-step pattern moves (fs.move_matching) with
+                  exact undo, and folder create/remove.
+uaic/core/        Planner protocol, Gemini adapter, memory, context assembly,
+                  and the planning guide sent after the trust rules.
 uaic/runtime/     The execution loop, capability freeze, confirmation binding,
                   taint propagation, progress events, cooperative cancellation.
 uaic/app/         The session (composition root) and the backend thread that
@@ -187,12 +192,15 @@ uaic/app/         The session (composition root) and the backend thread that
 uaic/surface.py   THE UI integration surface: the only uaic module a UI may
                   import (enforced by tests/test_surface.py). Documents the protocol.
 uaic/desktop/     The PySide6 app: window, approval and confirmation dialogs,
-                  offline voice. Imports uaic only through uaic.surface.
+                  offline voice (Whisper, Vosk fallback; spoken-form cleanup
+                  in spoken.py). Imports uaic only through uaic.surface.
 tests/            pytest; table-driven where possible.
 eval/             The evaluation harness and task corpus (see eval/README.md).
 scripts/          injection_report.py, confirmation_cost.py, live_check.py,
-                  live_e2e.py, build_desktop.py, and the mutation harness that
-                  proves each defence test can fail.
+                  live_e2e.py, build_desktop.py, get_whisper_model.py (one-time
+                  model download), speech_eval.py (word error rate per
+                  speaker), and the mutation harness that proves each defence
+                  test can fail.
 ```
 
 ## Evaluation
@@ -210,9 +218,18 @@ execution loop, the context trust boundary, manifest-derived tool schemas,
 confirmation binding, taint propagation and gate escalation, the Gemini planner
 behind the `Planner` protocol, the evaluation harness, progress and
 cancellation callbacks, the UI integration surface, and the desktop application.
-The app (PySide6) covers plan approval, folder granting, step confirmation, a
-live execution view, results and undo, offline speech in and out, and
-PyInstaller packaging. ruff clean.
+The app (PySide6) covers:
+- plan approval, folder granting and step confirmation;
+- a live execution view, step outputs, history (with past outputs) and clear
+  history;
+- undo;
+- offline speech in (Whisper) and out;
+- PyInstaller packaging.
+
+Bulk pattern moves and folder tools have exact undo, and the planner gets a
+planning guide. 553 tests pass, ruff is clean, and the mutation harness reports
+0 problems. The design, results and limitations are in
+[PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 
 The browser plugin is **not implemented**; its adversarial tests are prepared,
 so the write-up can report its threat model without the plugin existing.

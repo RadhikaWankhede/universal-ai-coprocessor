@@ -160,3 +160,15 @@ def test_empty_directory_is_rejected(tmp_path):
 def test_missing_directory_is_rejected(tmp_path):
     with pytest.raises(ManifestError, match="not found"):
         load_registry(tmp_path / "nope")
+
+
+def test_every_path_argument_is_scoped_and_required():
+    """An unscoped path argument is a way out of the granted folders, and a
+    scoped one cannot be optional (the broker refuses a missing scoped arg)."""
+    reg = default_registry()
+    for name in reg.names():
+        spec = reg.lookup(name)
+        for arg, a in spec.args.items():
+            if a.type == "path":
+                assert arg in spec.scope_args, f"{name}.{arg} is a path but not scoped"
+                assert a.required, f"{name}.{arg} is scoped but optional"
