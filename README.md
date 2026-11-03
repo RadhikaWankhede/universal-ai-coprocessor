@@ -58,15 +58,24 @@ via the `UAIC_GEMINI_API_KEY` environment variable.
 
 ## Running it
 
-There is no end-user entry point yet: the LLM planner adapter and the HTTP/SSE
-server are the next pieces. Today the system is exercised through its test
-suite and the evaluation harness.
+The desktop application is the end-user entry point. The UI and backend run in
+the same Python process; there is no HTTP server, socket, or network transport
+between them. The Gemini planner still makes outbound HTTPS requests when
+`UAIC_GEMINI_API_KEY` is configured.
 
 ```
+py -m uaic_desktop      # launch the desktop application
 py -m pytest            # the full suite (~400 tests, 1 skipped where symlinks are unavailable)
 py -m ruff check .      # lint; must be clean
 py eval/harness.py      # run the task corpus and print the metrics table
 ```
+
+The initial desktop milestones include typed requests, full plan review, and
+explicit folder grants. The backend does not currently expose plan-step
+reversibility metadata, so the approval screen calls out that it cannot mark
+irreversible steps; this remains an integration gap. Step-level confirmation
+and cancellation are also not implemented yet. A step requiring a separate
+confirmation is declined rather than approved automatically.
 
 ## Layout
 
@@ -85,6 +94,7 @@ tests/            pytest; table-driven where possible.
 eval/             The evaluation harness and task corpus (see eval/README.md).
 scripts/          injection_report.py, confirmation_cost.py, and the mutation
                   harness that proves each defence test can fail.
+uaic_desktop/     Same-process PySide6 desktop entry point and composition root.
 ```
 
 ## Evaluation
@@ -100,13 +110,16 @@ Built and tested: contracts, Plan, Capability Broker, capability freeze, Action
 Journal, Undo Engine, the fs/git/terminal/documents plugins, the runtime
 execution loop, the context trust boundary, manifest-derived tool schemas,
 confirmation binding, taint propagation and gate escalation, the Gemini planner
-behind the `Planner` protocol, and the evaluation harness. ruff clean.
+behind the `Planner` protocol, the evaluation harness, and the initial desktop
+application with typed requests, plan review, and explicit folder grants.
 
 The browser plugin is **not implemented**; its adversarial tests are prepared,
 so the write-up can report its threat model without the plugin existing.
 
-Next: a desktop application running in the **same process** as the backend, and
-wiring the live planner end to end. There is deliberately no HTTP server, socket
-or network transport between the UI and the backend — a network port would be a
-way for something other than the user to issue approvals, which this project's
-threat model does not survive.
+The desktop approval screen cannot yet mark irreversible plan steps because
+the current Plan API does not expose reversibility metadata. Step-level
+confirmation, execution progress, cancellation, undo, and voice input/output
+remain future milestones. The UI runs in the **same process** as the backend.
+There is deliberately no HTTP server, socket, or network transport between
+them — a network port would be a way for something other than the user to issue
+approvals, which this project's threat model does not survive.

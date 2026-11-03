@@ -1,4 +1,5 @@
 pydantic>=2.7
+PySide6>=6.8
 pyyaml>=6.0
 pypdf>=4.0          # documents plugin; optional at runtime
 pytest>=8.0
