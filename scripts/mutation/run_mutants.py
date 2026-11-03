@@ -20,6 +20,8 @@ ROOT = HERE.parent.parent
 SUITE = "tests/test_injection.py"
 B = "tests/test_confirmation_binding.py"
 T = "tests/test_taint.py"
+P = "tests/test_progress.py"
+F = "tests/test_fs_batch.py"
 
 # (file, substring of the test id) -> the mutants to run. Each must turn the
 # test RED, unless written "NAME=GREEN": that records an attack with two
@@ -66,6 +68,18 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (T, "next_runs_first_plan_carries", ("STAMP_OFF",)),
     (T, "outside_the_approved_plan_is_escalated", ("TAINT_OFF",)),
     (T, "without_a_ledger_nothing_counts", ("TAINT_OFF",)),
+    (P, "failing_progress_sink_changes_nothing", ("PROGRESS_RAISES",)),
+    (P, "sink_cannot_rewrite_the_call", ("PROGRESS_LIVE_ARGS",)),
+    (P, "cancel_before_the_plan_is_shown", ("CANCEL_LOOP_OFF",)),
+    (P, "cancel_mid_dispatch_finishes_that_step", ("CANCEL_LOOP_OFF",)),
+    (P, "cancel_does_not_answer_a_confirmation", ("CANCEL_DISPATCH_OFF",)),
+    (P, "cancelled_step_is_journalled", ("CANCEL_DISPATCH_OFF",)),
+    (F, "tampered_record_cannot_send", ("RECORD_UNCHECKED",)),
+    (F, "tampered_record_cannot_pull", ("RECORD_UNCHECKED",)),
+    (F, "only_restores_into_the_folder", ("RECORD_UNCHECKED",)),
+    (F, "destination_must_be_inside", ("SCOPE_OFF",)),
+    (F, "source_folder_must_be_inside", ("SCOPE_OFF",)),
+    (F, "cannot_climb_above_the_grant", ("SCOPE_OFF",)),
 ]
 
 
@@ -96,7 +110,7 @@ def run(nodeid: str, mutant: str) -> tuple[str, str]:
 
 def main() -> int:
     show = "--show" in sys.argv
-    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T)
+    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T, P, F)
                                 for n in collect(path) if mutants_for(n) is not None]
     problems = 0
     for nodeid in nodeids:

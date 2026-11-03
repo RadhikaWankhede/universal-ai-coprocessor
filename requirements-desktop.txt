@@ -1,0 +1,10 @@
+# The desktop application. The core, the tests that do not need Qt, the
+# evaluation harness and the scripts need only requirements.txt.
+-r requirements.txt
+PySide6>=6.10          # the window (milestones 1-6)
+faster-whisper>=1.2    # offline speech-to-text, accent-robust (default engine);
+                       # model: py scripts/get_whisper_model.py
+vosk>=0.3.45           # offline speech-to-text, US English (fallback); needs a model folder
+sounddevice>=0.5       # microphone capture
+pyttsx3>=2.98          # offline text-to-speech via Windows SAPI5 (milestone 8)
+pyinstaller>=6.16      # packaging (milestone 9); build-time only

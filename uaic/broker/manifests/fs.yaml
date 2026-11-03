@@ -60,6 +60,57 @@ tools:
     risk: low
     rev: reversible
 
+  - name: fs.move_matching
+    summary: >-
+      Move every file directly inside a folder whose name matches a wildcard
+      pattern (for example *.jpg or report-*.pdf, case-insensitive) into a
+      destination folder, in ONE step. The destination is created if missing.
+      Use this instead of many fs.move steps whenever more than one file is moved
+      by type or name pattern; the file names do not need to be known in advance.
+      Subfolders are not searched. Nothing moves if any name already exists in
+      the destination.
+    args:
+      folder: {type: path}
+      pattern: {type: str}
+      destination: {type: path}
+    scope_args: [folder, destination]
+    risk: low
+    rev: reversible          # undo moves back exactly the files that moved
+    inverse: fs.restore_batch
+    escalate: [target_is_many_files]
+
+  - name: fs.restore_batch
+    summary: Move the files of an earlier fs.move_matching back where they came from
+    args:
+      batch_id: {type: str}
+      folder: {type: path}
+    scope_args: [folder]
+    risk: low
+    rev: reversible
+    inverse: fs.restore_batch
+
+  - name: fs.make_folder
+    summary: Create a new, empty folder (and any missing folders above it)
+    args:
+      path: {type: path}
+    scope_args: [path]
+    risk: low
+    rev: reversible
+    inverse: fs.remove_empty_folder
+
+  - name: fs.remove_empty_folder
+    summary: >-
+      Remove an EMPTY folder and its now-empty parents up to and including
+      up_to (pass up_to equal to path to remove just the one folder). Refuses if
+      anything else is inside; it can never delete a file.
+    args:
+      path: {type: path}
+      up_to: {type: path}    # scoped too: it must not reach above the grant
+    scope_args: [path, up_to]
+    risk: low
+    rev: reversible
+    inverse: fs.make_folder
+
   - name: fs.overwrite
     summary: Replace the contents of an existing file
     args:
