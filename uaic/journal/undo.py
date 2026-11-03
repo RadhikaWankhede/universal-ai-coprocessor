@@ -1,9 +1,12 @@
 """The Undo Engine: walk the journal backwards, replaying inverse operations.
 
 It STOPS at the first irreversible step rather than skipping past it - skipping
-would leave a state that is neither the before nor the after. Undo calls are
-dispatched through the broker like any other call, because an undo path that
-reached plugins directly would be an unaudited write path.
+would leave a state that is neither the before nor the after.
+
+This engine decides the ORDER. `execute` decides how a call is dispatched. The
+application's `Session` passes a dispatcher that takes each inverse through the
+broker and the journal under the plan's own granted folders, because an undo
+path that reached plugins directly would be an unaudited write path.
 """
 from __future__ import annotations
 

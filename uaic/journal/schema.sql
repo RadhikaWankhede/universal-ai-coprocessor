@@ -43,6 +43,26 @@ BEGIN
        OR OLD.status NOT IN ('intended', 'executed');
 END;
 
+-- The folders the user granted each plan, so undo can be judged against the
+-- same approval. Written once at the freeze, never changed.
+CREATE TABLE IF NOT EXISTS plan_grants (
+    plan_id    TEXT PRIMARY KEY,
+    ts         TEXT NOT NULL,
+    paths_json TEXT NOT NULL
+);
+
+CREATE TRIGGER IF NOT EXISTS plan_grants_no_update
+BEFORE UPDATE ON plan_grants
+BEGIN
+    SELECT RAISE(ABORT, 'plan grants are append-only');
+END;
+
+CREATE TRIGGER IF NOT EXISTS plan_grants_no_delete
+BEFORE DELETE ON plan_grants
+BEGIN
+    SELECT RAISE(ABORT, 'plan grants are never deleted');
+END;
+
 -- Nothing is ever deleted from the journal.
 CREATE TRIGGER IF NOT EXISTS journal_no_delete
 BEFORE DELETE ON journal

@@ -44,8 +44,8 @@ Events, in the order a run produces them:
     HistoryCleared  event.history (now empty of everything before the clear)
     Failed     event.action, event.message
 
-Rules for any UI (from PROJECT_CONTEXT.md, section 9)
-====================================================
+Rules for any UI (see PROJECT_CONTEXT.md, section 6.1)
+=====================================================
 
 * The UI contains no security logic. It displays what the backend says and
   passes back what the user chose. It never classifies, filters or decides.

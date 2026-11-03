@@ -31,10 +31,32 @@ GATE: dict[tuple[Rev, Risk], Decision] = {
 }
 
 
+ARG_TYPES: dict[str, type] = {"str": str, "email": str, "bool": bool, "int": int}
+
+
 def _deny(rule_id: str, reason: str) -> Verdict:
     # An unclassifiable call is treated as the worst case, never the best.
     return Verdict(decision=Decision.DENY, risk=Risk.CRITICAL,
                    rev=Rev.IRREVERSIBLE, reasons=(reason,), rule_ids=(rule_id,))
+
+
+def _wrong_types(spec: ToolSpec, args: dict) -> list[str]:
+    """Arguments whose value is not of the type the manifest declares.
+
+    Path arguments are not listed here: every one is scoped, and stage 3 refuses
+    a value that will not resolve. A declared-optional argument may be None.
+    """
+    wrong = []
+    for name, value in args.items():
+        arg = spec.args[name]
+        if arg.type == "path" or (value is None and not arg.required):
+            continue
+        accepted = isinstance(value, ARG_TYPES[arg.type])
+        if arg.type == "int" and isinstance(value, bool):   # bool is a subclass of int
+            accepted = False
+        if not accepted:
+            wrong.append(name)
+    return wrong
 
 
 def decide(call: ToolCall, caps: CapabilitySet, *,
@@ -55,6 +77,11 @@ def decide(call: ToolCall, caps: CapabilitySet, *,
     if unexpected:
         return _deny("BRK.BAD_ARGS",
                      f"undeclared argument(s): {', '.join(sorted(unexpected))}")
+
+    wrong = _wrong_types(spec, call.args)
+    if wrong:
+        return _deny("BRK.BAD_ARGS",
+                     f"argument(s) of the wrong type: {', '.join(sorted(wrong))}")
 
     # 3. normalise every scoped target to its real canonical path
     targets: list[Path] = []

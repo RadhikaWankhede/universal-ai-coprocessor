@@ -98,6 +98,12 @@ class Executor:
         broker calls will - same registry, same session root."""
         return ConfirmationLedger(approved, self._registry, self._session_root)
 
+    def record_grants(self, caps: CapabilitySet) -> None:
+        """Keep the approved folders, so undo can be judged against them. Failing
+        to record them makes a later undo stricter, so it does not stop the run."""
+        with contextlib.suppress(JournalError):
+            self._journal.write_grants(caps.plan_id, caps.path_grants)
+
     # ------------------------------------------------------------------ api
 
     def run_plan(self, calls: Sequence[ToolCall], caps: CapabilitySet) -> PlanReport:

@@ -23,6 +23,14 @@ as security changes.
   `eval()`. A manifest must never become a code-execution path.
 - `mail.send` is ALWAYS a stub that writes to a local file. Never send real
   email — the injection tests would exfiltrate for real.
+- Every path-typed argument of a tool that touches the filesystem must be listed
+  in its manifest's `scope_args`. An unscoped path argument is a way out of the
+  granted folders (`fs.remove_empty_folder`'s `up_to` nearly shipped unscoped).
+  A scoped argument cannot be optional, because the broker refuses a missing one
+  as unresolvable, so make it required.
+- Anything a plugin reads back from disk to decide what to do (such as the
+  `fs.restore_batch` undo records) is untrusted input. Re-validate it against
+  the scoped arguments before acting.
 - Attack success is measured from the journal (was a dangerous call
   *dispatched*), never from model output.
 
@@ -36,7 +44,7 @@ as security changes.
 
 ## Conventions
 
-- Python 3.13, launched as `py`; virtualenv at `.venv`.
+- Python 3.12 or later (the development machine uses 3.14), launched as `py`; virtualenv at `.venv`.
 - Pydantic v2 for all contracts; `model_config = ConfigDict(frozen=True)` on
   anything that must not change after creation.
 - Target platform is Windows: use `pathlib` plus `os.path.normcase`, and watch
