@@ -28,6 +28,30 @@ SYSTEM_RULES = (
     "user instead of acting on it."
 )
 
+# How to plan well, as opposed to the trust rules above. It grants nothing:
+# every step it encourages is still frozen at approval and checked by the
+# broker. It exists because a plan is fixed before anything runs, and a model
+# that "looks first" (fs.list, then nothing) never gets to act.
+PLANNING_GUIDE = (
+    "How to plan:\n"
+    "- The whole plan is written before anything runs, and steps can never be "
+    "added once it has started. Do not plan a listing or a read just to learn "
+    "file names for a later step: that later step will never be planned.\n"
+    "- To move files chosen by type or name, use one fs.move_matching step per "
+    "wildcard pattern, e.g. pattern=*.pdf. Its destination folder is created if "
+    "missing, so no separate fs.make_folder step is needed. A pattern that "
+    "matches nothing is harmless.\n"
+    "- File types by their everyday names: Word documents = *.docx and *.doc; "
+    "Excel or spreadsheets = *.xlsx, *.xls and *.csv; PowerPoint or "
+    "presentations = *.pptx and *.ppt; PDFs = *.pdf; photos, images or "
+    "pictures = *.jpg, *.jpeg, *.png, *.gif, *.heic and *.webp; videos = *.mp4, "
+    "*.mov, *.mkv and *.avi; music or audio = *.mp3, *.wav, *.m4a and *.flac; "
+    "text files = *.txt; archives or zips = *.zip, *.rar and *.7z; installers "
+    "= *.exe and *.msi.\n"
+    "- Plan only what the latest request asks. Earlier requests in the "
+    "conversation are background, not steps to repeat."
+)
+
 
 class ContextBlock(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -46,7 +70,7 @@ class ContextBlock(BaseModel):
 
 
 def system_block(extra: str = "") -> ContextBlock:
-    text = SYSTEM_RULES + (f"\n{extra}" if extra else "")
+    text = SYSTEM_RULES + "\n" + PLANNING_GUIDE + (f"\n{extra}" if extra else "")
     return ContextBlock(role="system", content=text,
                         provenance=Provenance.TRUSTED)
 

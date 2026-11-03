@@ -34,6 +34,15 @@ from uaic.core.memory import SessionMemory
 from uaic.journal import Status
 from uaic.runtime.executor import Executor, StepOutcome
 from uaic.runtime.freeze import escalation_needed, freeze_plan
+from uaic.runtime.progress import (
+    CANCELLED_RULE,
+    CancelToken,
+    ProgressSink,
+    display_output,
+    emit,
+    is_cancelled,
+    make_event,
+)
 from uaic.runtime.taint import taint_of
 
 MAX_RETRIES = 2         # per step
@@ -52,6 +61,7 @@ class Outcome(StrEnum):
     NEEDS_APPROVAL = "needs_approval"    # a re-plan wanted more than was granted
     EXHAUSTED = "exhausted"              # retries and re-plans ran out
     PLANNING_FAILED = "planning_failed"  # the model produced no usable plan
+    CANCELLED = "cancelled"              # the user stopped the run at a safe point
 
 
 @dataclass
@@ -166,7 +176,12 @@ class AgentLoop:
 
     # ------------------------------------------------------------------- run
 
-    def run(self, request: str, plan_id: str) -> LoopReport:
+    def run(self, request: str, plan_id: str, *,
+            progress: ProgressSink | None = None,
+            cancel: CancelToken | None = None) -> LoopReport:
+        """`progress` observes every step, refusals included; `cancel` stops
+        the run at the next safe point. Both are optional and neither can make
+        anything happen that would not have happened without it."""
         self.memory.user_said(request)
         report = LoopReport(request=request, outcome=Outcome.PLANNING_FAILED)
 
@@ -180,6 +195,8 @@ class AgentLoop:
 
         plan = self._stamp(plan)
         report.plan = plan
+        if is_cancelled(cancel):
+            return self._cancelled(report, 0)
 
         granted = self._approve(plan)
         if granted is None:
@@ -200,10 +217,27 @@ class AgentLoop:
         attempts: dict[str, int] = {}
 
         while pending:
+            if is_cancelled(cancel):
+                # Safe point: before the next call is judged.
+                return self._cancelled(report, asker.asked)
             call = pending.pop(0)
-            outcome = executor.run_one(call, caps, ledger)
+            total = max([call.seq, *(c.seq for c in pending)])
+            outcome = executor.run_one(
+                call, caps, ledger, cancel=cancel,
+                on_judged=lambda c, v, t=total: emit(
+                    progress, make_event("judged", c, v, total=t)))
             report.steps.append(outcome)
             self._remember(outcome)
+            emit(progress, make_event(
+                "finished", outcome.call, outcome.verdict, total=total,
+                status=outcome.status,
+                error=outcome.result.error if outcome.result is not None else None,
+                output=(display_output(outcome.result.payload)
+                        if outcome.result is not None and outcome.result.ok else None)))
+
+            if (outcome.status == Status.DECLINED
+                    and CANCELLED_RULE in outcome.verdict.rule_ids):
+                return self._cancelled(report, asker.asked)
 
             if outcome.status == Status.EXECUTED:
                 continue
@@ -241,6 +275,15 @@ class AgentLoop:
         return report
 
     # ------------------------------------------------------------- internals
+
+    def _cancelled(self, report: LoopReport, asked: int) -> LoopReport:
+        """Stop. Everything already executed stays journalled and undoable."""
+        report.outcome = Outcome.CANCELLED
+        report.confirmations = asked
+        report.message = "cancelled by the user"
+        self.memory.noted("the user cancelled the run",
+                          source_ref=f"runtime:{report.plan.plan_id if report.plan else '?'}")
+        return report
 
     def _budget(self, plan: Plan) -> int:
         """The step budget the capability set will enforce.

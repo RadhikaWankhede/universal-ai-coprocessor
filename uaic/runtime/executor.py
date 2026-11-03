@@ -14,6 +14,7 @@ from uaic.broker import CapabilitySet, Registry, decide, default_registry
 from uaic.contracts import Decision, Rev, Risk, ToolCall, ToolResult, Verdict
 from uaic.journal import ActionJournal, JournalError, Status
 from uaic.runtime.binding import ConfirmationLedger
+from uaic.runtime.progress import CancelToken, cancelled_verdict, is_cancelled
 from uaic.runtime.taint import escalate
 
 # Asks the user. Returns True to proceed. A plan-level confirmation covers the
@@ -22,6 +23,10 @@ from uaic.runtime.taint import escalate
 Confirmer = Callable[[ToolCall, Verdict], bool]
 
 PluginExecute = Callable[[ToolCall], ToolResult]
+
+# Told the final verdict of a call before anything is asked or dispatched.
+# Observational: its return value is ignored and its exceptions swallowed.
+OnJudged = Callable[[ToolCall, Verdict], None]
 
 
 def deny_everything(call: ToolCall, verdict: Verdict) -> bool:
@@ -109,9 +114,16 @@ class Executor:
         return report
 
     def run_one(self, call: ToolCall, caps: CapabilitySet,
-                ledger: ConfirmationLedger | None = None) -> StepOutcome:
-        """Without a ledger, every plan-level question is asked."""
-        outcome, _ = self._run_one(call, caps, ledger)
+                ledger: ConfirmationLedger | None = None, *,
+                cancel: CancelToken | None = None,
+                on_judged: OnJudged | None = None) -> StepOutcome:
+        """Without a ledger, every plan-level question is asked.
+
+        `cancel` is read once, after the call is judged and any confirmation
+        answered, before it is journalled and dispatched (see progress.py).
+        """
+        outcome, _ = self._run_one(call, caps, ledger, cancel=cancel,
+                                   on_judged=on_judged)
         return outcome
 
     # --------------------------------------------------------------- internals
@@ -123,7 +135,9 @@ class Executor:
             self._journal.write_refusal(call, verdict, declined_by_user=declined)
 
     def _run_one(self, call: ToolCall, caps: CapabilitySet,
-                 ledger: ConfirmationLedger | None) -> tuple[StepOutcome, int]:
+                 ledger: ConfirmationLedger | None, *,
+                 cancel: CancelToken | None = None,
+                 on_judged: OnJudged | None = None) -> tuple[StepOutcome, int]:
         verdict = decide(call, caps, registry=self._registry,
                          session_root=self._session_root)
         asked = 0
@@ -132,6 +146,11 @@ class Executor:
             # Proposed with untrusted content in view, and never shown to the
             # user: one tier up. Without a ledger nothing counts as approved.
             verdict = escalate(verdict, call)
+
+        if on_judged is not None:
+            # An observer; nothing it does can change the verdict below.
+            with contextlib.suppress(Exception):
+                on_judged(call, verdict)
 
         if verdict.decision is Decision.DENY:
             self._record_refusal(call, verdict)
@@ -150,6 +169,13 @@ class Executor:
             if not self._confirm(call, verdict):
                 self._record_refusal(call, verdict, declined=True)
                 return StepOutcome(call, verdict, status=Status.DECLINED), asked
+
+        if is_cancelled(cancel):
+            # The last safe point: judged and (if needed) confirmed, but not yet
+            # journalled as an intent or dispatched. A cancel can only stop it.
+            stopped = cancelled_verdict(verdict)
+            self._record_refusal(call, stopped, declined=True)
+            return StepOutcome(call, stopped, status=Status.DECLINED), asked
 
         spec = self._registry.lookup(call.tool)
         plugin_name = call.tool.split(".", 1)[0]

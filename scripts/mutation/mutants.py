@@ -186,11 +186,51 @@ def undo_off() -> None:
     UndoEngine.undo_plan = lambda self, plan_id: UndoReport(plan_id=plan_id)
 
 
+def cancel_dispatch_off() -> None:
+    """The executor's pre-dispatch safe point: a cancel is ignored once a
+    call has been judged and confirmed."""
+    import uaic.runtime.executor as executor
+    executor.is_cancelled = lambda token: False
+
+
+def cancel_loop_off() -> None:
+    """The loop's safe points: a cancel is never noticed between steps or
+    before the plan is shown."""
+    import uaic.runtime.loop as loop
+    loop.is_cancelled = lambda token: False
+
+
+def progress_live_args() -> None:
+    """Progress events carry the call's own argument dict, not a copy."""
+    import dataclasses
+
+    import uaic.runtime.loop as loop
+    real = loop.make_event
+
+    def live(phase, call, verdict, **kw):
+        return dataclasses.replace(real(phase, call, verdict, **kw), args=call.args)
+    loop.make_event = live
+
+
+def progress_raises() -> None:
+    """A progress sink's exceptions propagate into the run."""
+    import uaic.runtime.loop as loop
+    loop.emit = lambda sink, event: sink(event) if sink is not None else None
+
+
+def record_unchecked() -> None:
+    """The fs batch-record check: an undo record on disk is trusted as written."""
+    import uaic.plugins.fs as fs
+    fs.check_record = lambda record, folder: [
+        (Path(m["dst"]), Path(m["src"])) for m in record["moves"]]
+
+
 MUTANTS = {fn.__name__.upper(): fn for fn in (
     escalation_off, freeze_off, undeclared_off, nonce_fixed, noted_trusted,
     observed_trusted, scope_off, no_resolve, gate_allow, silent_trunc, prompt_leak,
     binding_off, per_call, ask_every_step, taint_off, stamp_off, results_only_taint,
-    keyword_filter, plugins_missing, undo_off)}
+    keyword_filter, plugins_missing, undo_off, cancel_dispatch_off, cancel_loop_off,
+    progress_live_args, progress_raises, record_unchecked)}
 
 
 def pytest_configure(config) -> None:
