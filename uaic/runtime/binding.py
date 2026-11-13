@@ -69,12 +69,19 @@ def signature(call: ToolCall, registry: Registry, session_root: Path | None = No
     for name in sorted(args):
         value = args[name]
         if name in declared and declared[name].type == "path":
-            resolved = resolve(value, session_root)
-            key = ("path", canonical(resolved)) if resolved is not None else ("raw", repr(value))
+            if declared[name].many and isinstance(value, list | tuple):
+                key = ("paths", tuple(_path_key(v, session_root) for v in value))
+            else:
+                key = _path_key(value, session_root)
         else:
             key = ("value", json.dumps(value, sort_keys=True, default=repr))
         parts.append((name, key))
     return (call.tool, tuple(parts))
+
+
+def _path_key(value: object, session_root: Path | None) -> tuple:
+    resolved = resolve(value, session_root)
+    return ("path", canonical(resolved)) if resolved is not None else ("raw", repr(value))
 
 
 class ConfirmationLedger:

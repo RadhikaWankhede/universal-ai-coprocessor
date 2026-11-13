@@ -23,6 +23,7 @@ from uaic.contracts import Origin, Provenance, ToolCall, ToolResult
 READ_ONLY = frozenset({"fs.list", "fs.read"})
 
 BATCH_LIMIT = 500                       # files per fs.move_matching call
+RECORD_MISMATCH = "FS.BATCH_RECORD_MISMATCH"
 _BATCH_ID = re.compile(r"[0-9a-f]{12}")
 _PATTERN_FORBIDDEN = ("/", "\\", ":", "..", "\x00")
 
@@ -59,34 +60,52 @@ def _same(a: Path | str, b: Path | str) -> bool:
             == os.path.normcase(str(Path(b).resolve())))
 
 
-def check_record(record: object, folder: Path) -> list[tuple[Path, Path]]:
-    """Validate a batch record before anything is moved back.
+def batch_pairs(args: dict) -> list[tuple[Path, Path]]:
+    """The (now, back) moves of a restore, from its BROKERED arguments alone.
 
-    The record lives on disk, so it is treated as input, not as truth: every
-    file must come from the record's `to_folder` and go back DIRECTLY into its
-    `from_folder`, under the same name, and `from_folder` must be the folder
-    the broker scoped. A record edited to send a file anywhere else is
-    refused whole, before anything moves.
+    The broker has scoped every one of these paths. On top of that, each file
+    must sit directly in `source` and go back directly into `folder` under the
+    same name, so a restore can only ever reverse a move between those two.
+    """
+    folder, source = Path(args["folder"]), Path(args["source"])
+    moved, originals = args["moved"], args["originals"]
+    if (not isinstance(moved, list) or not isinstance(originals, list)
+            or len(moved) != len(originals)
+            or not all(isinstance(p, str) for p in (*moved, *originals))):
+        raise ValueError("moved and originals must be lists of paths of the same length")
+    pairs = []
+    for now, back in zip(map(Path, moved), map(Path, originals), strict=True):
+        if (now.name != back.name or now.name in ("", ".", "..")
+                or not _same(now.parent, source) or not _same(back.parent, folder)):
+            raise PermissionError(f"{now} -> {back} is not a move from {source} to {folder}")
+        pairs.append((now, back))
+    return pairs
+
+
+def check_record(record: object, pairs: list[tuple[Path, Path]],
+                 folder: Path, source: Path) -> list[tuple[Path, Path]]:
+    """Confirm the batch record describes exactly the brokered moves; return them.
+
+    The record lives on disk, so it is untrusted input, never a parameter: it
+    may only CONFIRM what the broker already checked. A record that names any
+    other folder or file, or one more or fewer, is refused whole before
+    anything moves - a tampered record is not a partial record.
     """
     if not isinstance(record, dict):
         raise ValueError("batch record is malformed")
     from_folder, to_folder = record.get("from_folder"), record.get("to_folder")
     moves = record.get("moves")
     if (not isinstance(from_folder, str) or not isinstance(to_folder, str)
-            or not isinstance(moves, list)):
+            or not isinstance(moves, list)
+            or not all(isinstance(m, dict) and isinstance(m.get("src"), str)
+                       and isinstance(m.get("dst"), str) for m in moves)):
         raise ValueError("batch record is malformed")
-    if not _same(from_folder, folder):
-        raise PermissionError(f"batch record belongs to {from_folder}, not {folder}")
-    pairs = []
-    for m in moves:
-        if (not isinstance(m, dict) or not isinstance(m.get("src"), str)
-                or not isinstance(m.get("dst"), str)):
-            raise ValueError("batch record is malformed")
-        back, now = Path(m["src"]), Path(m["dst"])
-        if (not _same(back.parent, from_folder) or not _same(now.parent, to_folder)
-                or back.name != now.name):
-            raise PermissionError(f"batch record entry {m!r} leaves its folders")
-        pairs.append((now, back))
+    if (not _same(from_folder, folder) or not _same(to_folder, source)
+            or len(moves) != len(pairs)
+            or not all(_same(m["dst"], now) and _same(m["src"], back)
+                       for m, (now, back) in zip(moves, pairs, strict=True))):
+        raise PermissionError(f"{RECORD_MISMATCH}: the batch record does not match the "
+                              "brokered undo; nothing was moved")
     return pairs
 
 
@@ -274,26 +293,37 @@ class FileSystemPlugin:
         lines = [f"moved {len(pairs)} file(s) matching {pattern} into {dest}"]
         lines += [f.name for f in files]
         return (lines,
-                self._inverse(call, "fs.restore_batch", batch_id=batch_id,
-                              folder=str(folder)),
+                self._restore_call(call, batch_id, folder, dest, pairs),
                 None)
 
+    def _restore_call(self, call: ToolCall, batch_id: str, from_folder: Path,
+                      to_folder: Path, pairs: list[tuple[Path, Path]]) -> ToolCall:
+        """The inverse of a batch whose `pairs` are (original, current). Every
+        path it will touch is an argument, so the journal holds them all and
+        the broker scopes each one at undo."""
+        return self._inverse(call, "fs.restore_batch", batch_id=batch_id,
+                             folder=str(from_folder), source=str(to_folder),
+                             moved=[str(d) for _, d in pairs],
+                             originals=[str(s) for s, _ in pairs])
+
     def _restore_batch(self, call: ToolCall):
-        batch_id, folder = call.args["batch_id"], Path(call.args["folder"])
+        batch_id = call.args["batch_id"]
         if not isinstance(batch_id, str) or not _BATCH_ID.fullmatch(batch_id):
             raise ValueError(f"{batch_id!r} is not a batch id")
+        folder, source = Path(call.args["folder"]), Path(call.args["source"])
+        pairs = batch_pairs(call.args)
         path = self.batch_root / f"{batch_id}.json"
         if not path.is_file():
             raise FileNotFoundError(f"no batch with id {batch_id}")
         record = json.loads(path.read_text(encoding="utf-8"))
-        pairs = check_record(record, folder)
+        pairs = check_record(record, pairs, folder, source)
         self._move_all(pairs)
         path.unlink()                        # used up: a record cannot be replayed
-        reverse = self._save_batch(Path(record["to_folder"]),
-                                   Path(record["from_folder"]), pairs)
+        # The redo moves the same files from `folder` back into `source`: each
+        # (now, back) pair is, for it, (where it returns to, where it is).
+        reverse = self._save_batch(source, folder, pairs)
         return ([f"moved {len(pairs)} file(s) back into {folder}"],
-                self._inverse(call, "fs.restore_batch", batch_id=reverse,
-                              folder=record["to_folder"]),
+                self._restore_call(call, reverse, source, folder, pairs),
                 None)
 
     def _make_folder(self, call: ToolCall):

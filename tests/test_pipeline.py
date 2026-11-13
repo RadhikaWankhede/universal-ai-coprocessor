@@ -122,6 +122,27 @@ def test_undeclared_argument_is_denied(caps, sandbox):
     assert v.rule_ids == ("BRK.BAD_ARGS",)
 
 
+@pytest.mark.parametrize("declared", ["float", "list", None, ["str"]])
+def test_an_unknown_argument_type_is_denied_not_raised(caps, declared):
+    from uaic.broker.manifest import ArgSpec, Registry, ToolSpec
+    # model_construct skips validation: the spec the loader would have refused.
+    spec = ToolSpec(name="x.go", risk=Risk.LOW, rev=Rev.REVERSIBLE, args={
+        "n": ArgSpec.model_construct(type=declared, required=False, default=None)})
+    registry = Registry({"x.go": spec})
+    for args in ({"n": 1.5}, {}):          # supplied or not, the tool is malformed
+        v = decide(call("x.go", **args), caps, registry=registry)
+        assert v.decision is Decision.DENY
+        assert v.rule_ids == ("BRK.UNKNOWN_ARG_TYPE",)
+
+
+def test_every_declarable_argument_type_has_a_check():
+    from typing import get_args
+
+    from uaic.broker.manifest import ArgType
+    from uaic.broker.pipeline import ARG_TYPES, PATH_TYPES
+    assert set(get_args(ArgType)) == set(ARG_TYPES) | PATH_TYPES
+
+
 def test_optional_argument_may_be_omitted(caps, sandbox):
     v = decide(call("fs.delete", path=str(sandbox["downloads"] / "a.pdf")), caps)
     assert v.decision is Decision.ALLOW

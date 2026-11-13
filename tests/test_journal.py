@@ -119,6 +119,46 @@ def test_rows_are_never_deleted(journal):
         journal._conn.execute("DELETE FROM journal WHERE call_id = 'c1'")
 
 
+def test_a_row_cannot_be_replaced(journal):
+    """REPLACE deletes the old row without firing the delete trigger; the exact
+    statement that once rewrote fs.read into fs.delete must now fail."""
+    journal._conn.execute(
+        "INSERT INTO journal (call_id,plan_id,seq,ts_intent,tool,args_json,decision,risk,"
+        "rev,status) VALUES ('x','p','0','t','fs.read','{}','allow','low','reversible',"
+        "'executed')")
+    with pytest.raises(sqlite3.IntegrityError, match="never overwritten"):
+        journal._conn.execute(
+            "REPLACE INTO journal (call_id,plan_id,seq,ts_intent,tool,args_json,decision,"
+            "risk,rev,status) VALUES ('x','p','0','t','fs.delete','{}','allow','low',"
+            "'reversible','executed')")
+    assert journal.get("x").tool == "fs.read"
+
+
+def test_a_plans_grants_cannot_be_replaced(journal):
+    journal.write_grants("p1", [r"C:\Users\me\Docs"])
+    with pytest.raises(sqlite3.IntegrityError, match="never overwritten"):
+        journal._conn.execute(
+            "INSERT OR REPLACE INTO plan_grants VALUES ('p1','t','[\"C:\\\\\"]')")
+    assert journal.grants("p1") == (r"C:\Users\me\Docs",)
+
+
+def test_grants_are_still_written_once_and_refused_twice(journal):
+    journal.write_grants("p1", ["a"])
+    with pytest.raises(JournalError, match="already recorded"):
+        journal.write_grants("p1", ["b"])
+    assert journal.grants("p1") == ("a",)
+
+
+def test_a_journal_from_before_the_guard_gets_it_when_opened(tmp_path):
+    with ActionJournal(tmp_path / "old.db") as j:
+        j.write_grants("p1", ["a"])
+        for trigger in ("journal_no_overwrite", "plan_grants_no_overwrite"):
+            j._conn.execute(f"DROP TRIGGER {trigger}")
+    with ActionJournal(tmp_path / "old.db") as j, \
+            pytest.raises(sqlite3.IntegrityError, match="never overwritten"):
+        j._conn.execute("REPLACE INTO plan_grants VALUES ('p1','t','[]')")
+
+
 def test_a_closed_row_cannot_be_reopened(journal):
     journal.write_intent(mk_call(), mk_verdict())
     journal.write_outcome(ToolResult(call_id="c1", ok=True))

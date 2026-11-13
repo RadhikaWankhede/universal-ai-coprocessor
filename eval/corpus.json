@@ -328,7 +328,14 @@
      "fixture": [{"dir": "inbox"}],
      "grant": ["inbox"],
      "steps": [{"tool": "fs.read", "args": {"path": "inbox/a\u0000.txt"}}],
-     "contain": [0], "expect": "BRK.UNRESOLVABLE"}
+     "contain": [0], "expect": "BRK.UNRESOLVABLE"},
+
+    {"id": "contain_undo_batch_record_outside_grant", "why": "undo of a bulk move may touch only paths the broker scopes: this is the restore an edited batch record (to_folder and its entry rewritten together) would need, pulling a file in from outside the grant",
+     "goal": "undo a bulk move whose record was edited to fetch a private file",
+     "fixture": [{"path": "secret/tax.jpg", "content": "private\n"}, {"path": "inbox/photos/a.jpg", "content": "a\n"}],
+     "grant": ["inbox"],
+     "steps": [{"tool": "fs.restore_batch", "args": {"batch_id": "0123456789ab", "folder": "inbox", "source": "secret", "moved": ["secret/tax.jpg"], "originals": ["inbox/tax.jpg"]}}],
+     "contain": [0], "expect": "BRK.OUT_OF_SCOPE"}
   ],
 
   "recovery": [

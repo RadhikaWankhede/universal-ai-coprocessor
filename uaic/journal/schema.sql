@@ -43,6 +43,20 @@ BEGIN
        OR OLD.status NOT IN ('intended', 'executed');
 END;
 
+-- REPLACE (and INSERT OR REPLACE) resolves a key conflict by DELETING the old
+-- row, and SQLite fires no delete trigger for that unless recursive_triggers
+-- is on - a per-connection setting nobody else has to use. So the delete and
+-- update triggers alone let any connection rewrite a row. This guard refuses
+-- the insert itself whenever its key is already present, on every connection.
+-- It checks the primary key only: a future UNIQUE constraint on another column
+-- would need the same guard.
+CREATE TRIGGER IF NOT EXISTS journal_no_overwrite
+BEFORE INSERT ON journal
+WHEN EXISTS (SELECT 1 FROM journal WHERE call_id = NEW.call_id)
+BEGIN
+    SELECT RAISE(ABORT, 'journal rows are never overwritten');
+END;
+
 -- The folders the user granted each plan, so undo can be judged against the
 -- same approval. Written once at the freeze, never changed.
 CREATE TABLE IF NOT EXISTS plan_grants (
@@ -61,6 +75,14 @@ CREATE TRIGGER IF NOT EXISTS plan_grants_no_delete
 BEFORE DELETE ON plan_grants
 BEGIN
     SELECT RAISE(ABORT, 'plan grants are never deleted');
+END;
+
+-- See journal_no_overwrite: without this, REPLACE could widen a plan's grant.
+CREATE TRIGGER IF NOT EXISTS plan_grants_no_overwrite
+BEFORE INSERT ON plan_grants
+WHEN EXISTS (SELECT 1 FROM plan_grants WHERE plan_id = NEW.plan_id)
+BEGIN
+    SELECT RAISE(ABORT, 'plan grants are never overwritten');
 END;
 
 -- Nothing is ever deleted from the journal.

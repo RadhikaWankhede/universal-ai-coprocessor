@@ -30,6 +30,9 @@ def tool_schema(spec: ToolSpec) -> dict[str, Any]:
         prop: dict[str, Any] = {"type": JSON_TYPE[arg.type]}
         if arg.type in HINT:
             prop["description"] = HINT[arg.type]
+        if arg.many:
+            prop = {"type": "array", "items": {"type": prop.pop("type")}, **prop}
+            prop["description"] = "A list. Each item: " + prop.get("description", arg.type)
         if arg.default is not None:
             prop["default"] = arg.default
         properties[name] = prop

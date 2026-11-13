@@ -102,6 +102,24 @@ tools:
         load_registry(tmp_path)
 
 
+@pytest.mark.parametrize("args, scoped", [
+    ("{names: {type: str, many: true}}", "[]"),        # a list of something else
+    ("{paths: {type: path, many: true}}", "[]"),       # a list of paths nobody scopes
+])
+def test_only_a_scoped_path_may_be_many(tmp_path, args, scoped):
+    write(tmp_path, "x.yaml", f"""
+plugin: x
+tools:
+  - name: x.gather
+    args: {args}
+    scope_args: {scoped}
+    risk: low
+    rev: reversible
+""")
+    with pytest.raises(ManifestError, match="only a scoped path may be many"):
+        load_registry(tmp_path)
+
+
 def test_unregistered_escalation_predicate_is_rejected(tmp_path):
     """A manifest cannot name a predicate that does not exist in code."""
     write(tmp_path, "x.yaml", """

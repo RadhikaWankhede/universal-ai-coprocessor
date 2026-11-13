@@ -7,6 +7,12 @@ Each test is run in a fresh pytest process with mutants from mutants.py
 applied. A test that stays GREEN with its defence removed is measuring
 nothing. Exit status is 0 only if every mapped run went red and every test
 in the injection suite is mapped.
+
+It also refuses to pass vacuously. Collecting nothing (no pytest, a broken
+import) used to print "0 problem(s)" and exit 0 having run nothing. Now the
+run fails loudly unless pytest works, every file collects, and exactly
+EXPECTED_PAIRS test x mutant pairs are run. Change EXPECTED_PAIRS only on
+purpose, in the same commit that changes the matrix or the tests it maps.
 """
 from __future__ import annotations
 
@@ -23,6 +29,11 @@ T = "tests/test_taint.py"
 P = "tests/test_progress.py"
 F = "tests/test_fs_batch.py"
 U = "tests/test_undo_brokered.py"
+J = "tests/test_journal.py"
+
+# The number of test x mutant runs the matrix below produces. Asserted, not
+# trusted: a run that finds fewer (or more) pairs has not measured the matrix.
+EXPECTED_PAIRS = 84
 
 # (file, substring of the test id) -> the mutants to run. Each must turn the
 # test RED, unless written "NAME=GREEN": that records an attack with two
@@ -77,21 +88,55 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (P, "cancelled_step_is_journalled", ("CANCEL_DISPATCH_OFF",)),
     (F, "tampered_record_cannot_send", ("RECORD_UNCHECKED",)),
     (F, "tampered_record_cannot_pull", ("RECORD_UNCHECKED",)),
-    (F, "only_restores_into_the_folder", ("RECORD_UNCHECKED",)),
+    # Two independent checks: the restore's own arguments, and the record against them.
+    (F, "only_restores_into_the_folder", ("RECORD_UNCHECKED=GREEN", "BATCH_ARGS_UNCHECKED=GREEN",
+                                          "RECORD_UNCHECKED+BATCH_ARGS_UNCHECKED")),
     (F, "destination_must_be_inside", ("SCOPE_OFF",)),
     (F, "source_folder_must_be_inside", ("SCOPE_OFF",)),
     (F, "cannot_climb_above_the_grant", ("SCOPE_OFF",)),
+    (F, "every_file_a_restore_names", ("SCOPE_OFF",)),
+    (F, "bulk_move_proposed_after_reading", ("TAINT_OFF",)),
+    (U, "edited_batch_record_cannot_pull", ("RECORD_UNCHECKED",)),
+    (U, "restore_naming_one_file_outside_the_grant", ("UNDO_UNBROKERED", "SCOPE_OFF")),
     (U, "outside_the_grant_is_refused", ("UNDO_UNBROKERED",)),
     (U, "is_journalled", ("UNDO_UNBROKERED",)),
     (U, "declined_inverse_does_not_run", ("UNDO_UNBROKERED",)),
     (U, "wrong_type_is_refused", ("ARG_TYPES_OFF",)),
+    (J, "cannot_be_replaced", ("REPLACE_GUARD_OFF",)),
 ]
 
 
+class HarnessError(Exception):
+    """The harness could not measure anything; never reported as a pass."""
+
+
+def fail_loudly(message: str) -> int:
+    bar = "!" * 72
+    print(f"\n{bar}\nMUTATION HARNESS DID NOT RUN THE MATRIX\n{message}\n{bar}",
+          file=sys.stderr)
+    print("\nFAILED: the matrix was not measured.")
+    return 2
+
+
+def check_pytest() -> None:
+    proc = subprocess.run([sys.executable, "-m", "pytest", "--version"],
+                          cwd=ROOT, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise HarnessError(
+            f"pytest cannot run under {sys.executable}:\n"
+            f"{(proc.stderr or proc.stdout).strip()}\n"
+            "Run this with the project's interpreter, e.g. .venv\\Scripts\\python.exe.")
+
+
 def collect(path: str) -> list[str]:
-    out = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", path],
-                         cwd=ROOT, capture_output=True, text=True, check=False).stdout
-    return [line for line in out.split() if line.startswith(path + "::")]
+    proc = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", path],
+                          cwd=ROOT, capture_output=True, text=True, check=False)
+    nodeids = [line for line in proc.stdout.split() if line.startswith(path + "::")]
+    if proc.returncode != 0 or not nodeids:
+        raise HarnessError(f"collecting {path} failed (pytest exit {proc.returncode}, "
+                           f"{len(nodeids)} test(s)):\n"
+                           f"{(proc.stdout + proc.stderr).strip()[-2000:]}")
+    return nodeids
 
 
 def mutants_for(nodeid: str) -> tuple[str, ...] | None:
@@ -115,9 +160,19 @@ def run(nodeid: str, mutant: str) -> tuple[str, str]:
 
 def main() -> int:
     show = "--show" in sys.argv
-    nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T, P, F, U)
-                                for n in collect(path) if mutants_for(n) is not None]
+    try:
+        check_pytest()
+        nodeids = collect(SUITE) + [n for path in ("tests/test_loop.py", B, T, P, F, U, J)
+                                    for n in collect(path) if mutants_for(n) is not None]
+    except HarnessError as exc:
+        return fail_loudly(str(exc))
+    planned = sum(len(mutants_for(n) or ()) for n in nodeids)
+    if planned != EXPECTED_PAIRS:
+        return fail_loudly(f"the matrix maps {planned} test x mutant pair(s); "
+                           f"EXPECTED_PAIRS is {EXPECTED_PAIRS}. A test was lost, renamed "
+                           "or added: fix the matrix, or update EXPECTED_PAIRS on purpose.")
     problems = 0
+    ran = 0
     for nodeid in nodeids:
         name = nodeid.split("::", 1)[1]
         mutants = mutants_for(nodeid)
@@ -131,11 +186,14 @@ def main() -> int:
         for entry in mutants:
             mutant, _, expect = entry.partition("=")
             verdict, why = run(nodeid, mutant)
+            ran += 1
             print(f"{entry:24} {verdict:6} {name}")
             if show and why:
                 print(f"{'':31}{why[:150]}")
             problems += verdict != (expect or "RED")
-    print(f"\n{problems} problem(s).")
+    if ran != EXPECTED_PAIRS:
+        return fail_loudly(f"ran {ran} pair(s), expected {EXPECTED_PAIRS}.")
+    print(f"\n{ran} pair(s) run, {problems} problem(s).")
     return 1 if problems else 0
 
 

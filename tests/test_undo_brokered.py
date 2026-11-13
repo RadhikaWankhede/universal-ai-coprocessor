@@ -1,6 +1,7 @@
 """Undo in the app goes through the broker and the journal like any other call."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from uaic.app.session import Session
@@ -9,6 +10,7 @@ from uaic.contracts import Origin, PlanStep, ToolCall, ToolResult
 from uaic.core import ScriptedPlanner
 from uaic.journal import Status
 from uaic.plugins import FileSystemPlugin
+from uaic.plugins.fs import RECORD_MISMATCH
 from uaic.runtime import AgentLoop, Executor, Outcome
 
 
@@ -167,3 +169,77 @@ def test_an_optional_argument_may_be_none_and_a_bool_is_not_a_string(tmp_path):
     bad = ToolCall(call_id="c", plan_id="p", tool="git.branch",
                    args={"repo": str(tmp_path), "name": True})
     assert verdict_for(bad, tmp_path).rule_ids == ("BRK.BAD_ARGS",)
+
+
+# --------------------------------------------------------- bulk moves (fs.restore_batch)
+
+def bulk_move(tmp_path: Path):
+    """A real fs.move_matching run by the Session, with only Downloads granted."""
+    granted = tmp_path / "Downloads"
+    granted.mkdir()
+    for name in ("a.jpg", "b.jpg"):
+        (granted / name).write_text(name)
+    fs = FileSystemPlugin(tmp_path / "data-trash")
+    planner = ScriptedPlanner([PlanStep(seq=1, tool="fs.move_matching", args={
+        "folder": str(granted), "pattern": "*.jpg", "destination": str(granted / "photos")})])
+    session = make_session(tmp_path, plugins={"fs": fs.execute}, planner=planner,
+                           approve=lambda plan: [granted])
+    report = session.run("move the photos")
+    assert report.outcome is Outcome.COMPLETED, report.describe()
+    return session, fs, granted, report.plan.plan_id
+
+
+def test_a_bulk_move_is_undone_through_the_broker(tmp_path):
+    session, _, granted, plan_id = bulk_move(tmp_path)
+
+    assert session.undo(plan_id).complete
+
+    assert sorted(p.name for p in granted.glob("*.jpg")) == ["a.jpg", "b.jpg"]
+    [row] = session.journal.rows(f"undo:{plan_id}")
+    assert (row.tool, row.status) == ("fs.restore_batch", Status.EXECUTED)
+    assert len(row.args["moved"]) == 2, "every file the undo touched is in the journal"
+    session.close()
+
+
+def test_an_edited_batch_record_cannot_pull_a_file_into_the_grant(tmp_path):
+    session, fs, granted, plan_id = bulk_move(tmp_path)
+    secret = tmp_path / "Documents" / "tax.jpg"
+    secret.parent.mkdir()
+    secret.write_text("private")
+    [path] = fs.batch_root.glob("*.json")
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["to_folder"] = str(secret.parent)            # the folder and the entry,
+    record["moves"][0]["dst"] = str(secret)             # rewritten to agree
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    report = session.undo(plan_id)
+
+    assert not report.complete
+    assert secret.read_text() == "private"
+    assert not (granted / "tax.jpg").exists()
+    assert sorted(p.name for p in (granted / "photos").iterdir()) == ["a.jpg", "b.jpg"]
+    [row] = session.journal.rows(f"undo:{plan_id}")
+    assert row.status == Status.FAILED and RECORD_MISMATCH in row.error
+    session.close()
+
+
+def test_a_restore_naming_one_file_outside_the_grant_is_refused(tmp_path):
+    granted = tmp_path / "granted"
+    (granted / "photos").mkdir(parents=True)
+    (granted / "photos" / "a.jpg").write_text("a")
+    secret = tmp_path / "secret" / "tax.jpg"
+    secret.parent.mkdir()
+    secret.write_text("private")
+    session = make_session(tmp_path)
+    journal_step(session, granted, inverse_call(
+        "fs.restore_batch", batch_id="0123456789ab", folder=str(granted),
+        source=str(granted / "photos"),
+        moved=[str(granted / "photos" / "a.jpg"), str(secret)],
+        originals=[str(granted / "a.jpg"), str(granted / "tax.jpg")]), grants=[granted])
+
+    report = session.undo("p")
+
+    assert not report.complete
+    assert "outside the granted folders" in report.failed[0][1]
+    assert secret.exists() and (granted / "photos" / "a.jpg").exists()
+    session.close()
