@@ -102,14 +102,18 @@ def decide(call: ToolCall, caps: CapabilitySet, *,
         return _deny("BRK.BAD_ARGS",
                      f"argument(s) of the wrong type: {', '.join(sorted(wrong))}")
 
-    # 3. normalise every scoped target to its real canonical path
-    targets: list[Path] = []
+    # 3. normalise every scoped target to its real canonical path. A `many`
+    #    argument is a list, and each of its paths is a target in its own right.
+    targets: list[tuple[str, Path]] = []
     for a in spec.scope_args:
-        t = resolve(call.args.get(a), session_root)
-        if t is None:
-            return _deny("BRK.UNRESOLVABLE",
-                         f"could not resolve {a}={call.args.get(a)!r}")
-        targets.append(t)
+        raw = call.args.get(a)
+        if spec.args[a].many and not isinstance(raw, list | tuple):
+            return _deny("BRK.UNRESOLVABLE", f"{a} must be a list of paths, got {raw!r}")
+        for value in (raw if spec.args[a].many else [raw]):
+            t = resolve(value, session_root)
+            if t is None:
+                return _deny("BRK.UNRESOLVABLE", f"could not resolve {a}={value!r}")
+            targets.append((a, t))
 
     # 4. inside the capability set frozen at approval?
     if not caps.permits_tool(call.tool):
@@ -118,13 +122,13 @@ def decide(call: ToolCall, caps: CapabilitySet, *,
     if call.seq >= caps.max_steps:
         return _deny("BRK.STEP_BUDGET_EXCEEDED",
                      f"step {call.seq} exceeds the plan budget of {caps.max_steps}")
-    for a, t in zip(spec.scope_args, targets, strict=True):
+    for a, t in targets:
         if not caps.covers_path(t):
             return _deny("BRK.OUT_OF_SCOPE",
                          f"{a} resolves outside the granted folders: {t}")
 
     # 5. how bad is it if this is wrong?
-    risk, rev = classify(spec, call.args, tuple(targets))
+    risk, rev = classify(spec, call.args, tuple(t for _, t in targets))
 
     # 6. policy lookup
     return Verdict(

@@ -180,7 +180,23 @@ def test_a_tampered_record_cannot_send_a_file_elsewhere(ws):
     assert (dst / "a.jpg").exists() and (dst / "B.JPG").exists(), "refused whole"
 
 
-def test_a_tampered_record_cannot_pull_a_file_from_elsewhere(ws):
+def _steal_dst(record, secret):
+    record["moves"][0]["dst"] = str(secret)
+
+
+def _steal_to_folder(record, secret):
+    record["to_folder"] = str(secret.parent)
+
+
+def _steal_both(record, secret):
+    # The pair that once got through: the folder AND the entry agree with each other.
+    _steal_to_folder(record, secret)
+    _steal_dst(record, secret)
+
+
+@pytest.mark.parametrize("steal", [_steal_dst, _steal_to_folder, _steal_both],
+                         ids=["dst", "to_folder", "to_folder+dst"])
+def test_a_tampered_record_cannot_pull_a_file_from_elsewhere(ws, steal):
     root, src, dst = ws
     fs = FileSystemPlugin(root / "trash")
     r = fs.execute(move_jpgs(src, dst))
@@ -188,12 +204,14 @@ def test_a_tampered_record_cannot_pull_a_file_from_elsewhere(ws):
     secret.parent.mkdir()
     secret.write_text("private", encoding="utf-8")
 
-    def steal(record):
-        record["moves"][0]["dst"] = str(secret)
-    _tamper(fs, r.inverse, steal)
+    _tamper(fs, r.inverse, lambda record: steal(record, secret))
+    back = fs.execute(r.inverse)
 
-    assert not fs.execute(r.inverse).ok
-    assert secret.exists()
+    assert not back.ok
+    assert fsmod.RECORD_MISMATCH in back.error
+    assert secret.read_text(encoding="utf-8") == "private"
+    assert not (src / "a.jpg").exists()
+    assert (dst / "a.jpg").exists() and (dst / "B.JPG").exists(), "refused whole"
 
 
 def test_a_record_only_restores_into_the_folder_the_broker_scoped(ws):
@@ -248,6 +266,35 @@ def test_a_bulk_move_inside_the_grant_is_allowed_without_a_prompt(ws):
     caps = _caps("fs.move_matching", src, dst.parent)
     verdict = decide(move_jpgs(src, dst), caps)
     assert verdict.decision is Decision.ALLOW
+
+
+def restore(folder: Path, source: Path, moved: list[Path], originals: list[Path]) -> ToolCall:
+    return call("fs.restore_batch", batch_id="0123456789ab", folder=str(folder),
+                source=str(source), moved=[str(p) for p in moved],
+                originals=[str(p) for p in originals])
+
+
+def test_every_file_a_restore_names_must_be_inside_a_granted_folder(ws):
+    root, src, dst = ws
+    caps = _caps("fs.restore_batch", src, dst.parent)
+    inside = restore(src, dst, [dst / "a.jpg"], [src / "a.jpg"])
+    assert decide(inside, caps).decision is Decision.ALLOW
+
+    stray = restore(src, dst, [dst / "a.jpg", root / "Documents" / "tax.jpg"],
+                    [src / "a.jpg", src / "tax.jpg"])
+    verdict = decide(stray, caps)
+
+    assert verdict.decision is Decision.DENY
+    assert "BRK.OUT_OF_SCOPE" in verdict.rule_ids
+
+
+@pytest.mark.parametrize("moved", ["C:/one/path.jpg", None, 5, [None]])
+def test_a_list_of_paths_that_is_not_a_list_of_paths_is_unresolvable(ws, moved):
+    _, src, dst = ws
+    caps = _caps("fs.restore_batch", src, dst.parent)
+    bad = call("fs.restore_batch", batch_id="0123456789ab", folder=str(src),
+               source=str(dst), moved=moved, originals=[str(src / "a.jpg")])
+    assert decide(bad, caps).rule_ids == ("BRK.UNRESOLVABLE",)
 
 
 def test_remove_empty_folder_cannot_climb_above_the_grant(ws):

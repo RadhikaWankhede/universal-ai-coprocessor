@@ -90,6 +90,13 @@ def test_path_typed_arguments_are_joined_to_the_root(tmp_path):
     assert out["path"] == str(tmp_path / "inbox/a.txt")
 
 
+def test_each_path_in_a_list_of_paths_is_joined_to_the_root(tmp_path):
+    out = H.resolve_args("fs.restore_batch", {"moved": ["a/x.jpg", "a/y.jpg"],
+                                              "batch_id": "0123456789ab"}, tmp_path)
+    assert out["moved"] == [str(tmp_path / "a/x.jpg"), str(tmp_path / "a/y.jpg")]
+    assert out["batch_id"] == "0123456789ab"
+
+
 def test_non_path_arguments_are_left_alone(tmp_path):
     out = H.resolve_args("mail.send", {"to": "x@y.invalid", "body": "inbox/a.txt"}, tmp_path)
     assert out == {"to": "x@y.invalid", "body": "inbox/a.txt"}   # body is not a path type

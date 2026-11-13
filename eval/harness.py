@@ -139,9 +139,11 @@ def resolve_args(tool: str, args: dict, root: Path) -> dict:
     spec = REG.lookup(tool)
     out = {}
     for name, value in args.items():
-        if spec and name in spec.args and spec.args[name].type == "path" \
-                and isinstance(value, str):
+        is_path = spec and name in spec.args and spec.args[name].type == "path"
+        if is_path and isinstance(value, str):
             out[name] = abs_path(root, value)
+        elif is_path and spec.args[name].many and isinstance(value, list):
+            out[name] = [abs_path(root, v) if isinstance(v, str) else v for v in value]
         else:
             out[name] = value
     return out

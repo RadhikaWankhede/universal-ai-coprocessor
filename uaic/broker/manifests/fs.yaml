@@ -83,8 +83,13 @@ tools:
     summary: Move the files of an earlier fs.move_matching back where they came from
     args:
       batch_id: {type: str}
-      folder: {type: path}
-    scope_args: [folder]
+      folder: {type: path}                  # where the files go back to
+      source: {type: path}                  # the folder they are in now
+      moved: {type: path, many: true}       # each file, where it is now
+      originals: {type: path, many: true}   # each file, where it goes back to
+    # Every path the restore touches is an argument, so the broker scopes each
+    # one. The batch record on disk can only confirm these, never add to them.
+    scope_args: [folder, source, moved, originals]
     risk: low
     rev: reversible
     inverse: fs.restore_batch

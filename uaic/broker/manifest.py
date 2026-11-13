@@ -29,6 +29,7 @@ class ArgSpec(BaseModel):
     type: ArgType
     required: bool = True
     default: Any | None = None
+    many: bool = False        # a list of values; only a path may be many, and every one is scoped
 
 
 class ToolSpec(BaseModel):
@@ -113,6 +114,11 @@ def load_manifest(path: Path) -> PluginManifest:
         if bad_types:
             raise ManifestError(
                 f"{path.name}: {spec.name} scope_args must be path-typed: {bad_types}")
+        bad_many = [n for n, a in spec.args.items()
+                    if a.many and (a.type != "path" or n not in spec.scope_args)]
+        if bad_many:
+            raise ManifestError(
+                f"{path.name}: {spec.name} only a scoped path may be many: {bad_many}")
         missing_preds = set(spec.escalate) - known_predicates()
         if missing_preds:
             raise ManifestError(

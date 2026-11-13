@@ -219,10 +219,20 @@ def progress_raises() -> None:
 
 
 def record_unchecked() -> None:
-    """The fs batch-record check: an undo record on disk is trusted as written."""
+    """The fs batch-record check: an undo record on disk is trusted as written,
+    and its moves are made instead of the brokered ones."""
     import uaic.plugins.fs as fs
-    fs.check_record = lambda record, folder: [
+    fs.check_record = lambda record, pairs, folder, source: [
         (Path(m["dst"]), Path(m["src"])) for m in record["moves"]]
+
+
+def batch_args_unchecked() -> None:
+    """The fs restore's own argument check: moves need not run between `source`
+    and `folder` under the same name."""
+    import uaic.plugins.fs as fs
+    fs.batch_pairs = lambda args: [
+        (Path(now), Path(back)) for now, back in zip(args["moved"], args["originals"],
+                                                     strict=True)]
 
 
 def undo_unbrokered() -> None:
@@ -243,8 +253,8 @@ MUTANTS = {fn.__name__.upper(): fn for fn in (
     observed_trusted, scope_off, no_resolve, gate_allow, silent_trunc, prompt_leak,
     binding_off, per_call, ask_every_step, taint_off, stamp_off, results_only_taint,
     keyword_filter, plugins_missing, undo_off, cancel_dispatch_off, cancel_loop_off,
-    progress_live_args, progress_raises, record_unchecked, undo_unbrokered,
-    arg_types_off)}
+    progress_live_args, progress_raises, record_unchecked, batch_args_unchecked,
+    undo_unbrokered, arg_types_off)}
 
 
 def pytest_configure(config) -> None:

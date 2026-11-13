@@ -45,6 +45,20 @@ ENV_MODEL = "UAIC_GEMINI_MODEL"
 MAX_STEPS = 25          # a plan longer than this is a runaway, not a plan
 
 
+def _narrow(prop: dict[str, Any]) -> dict[str, Any]:
+    """One property, in the subset of schema this provider accepts.
+
+    A list needs an `items` schema, which is not in that subset. Only a plugin
+    ever builds a call with a list argument (the undo of a bulk move), so it is
+    declared here as a string the model has no reason to fill; a value that is
+    not a list is refused by the broker anyway.
+    """
+    if prop.get("type") == "array":
+        return {"type": "string",
+                "description": "Not for planning: filled in only by undo."}
+    return {k: v for k, v in prop.items() if k in ("type", "description")}
+
+
 def function_declarations(registry: Registry) -> list[dict[str, Any]]:
     """Convert the broker's tool schemas into this provider's wire format.
 
@@ -63,11 +77,7 @@ def function_declarations(registry: Registry) -> list[dict[str, Any]]:
             # schema is narrowed rather than passed through verbatim.
             declaration["parameters"] = {
                 "type": "object",
-                "properties": {
-                    name: {k: v for k, v in prop.items()
-                           if k in ("type", "description")}
-                    for name, prop in properties.items()
-                },
+                "properties": {name: _narrow(prop) for name, prop in properties.items()},
                 "required": schema["input_schema"]["required"],
             }
         declarations.append(declaration)
