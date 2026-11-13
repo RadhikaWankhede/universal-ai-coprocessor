@@ -6,9 +6,11 @@ about it. It says what the system is, how it works, what the evidence shows,
 which claims the evidence supports and which it does not. Read it before writing
 code or prose.
 
-**State as of 2026-11-04:** 562 tests collected, 562 passing. `ruff check .`
-clean. The mutation harness reports 0 problems across 27 mutants. The
-evaluation harness numbers are unchanged from the original ablation (§5.3).
+**State as of 2026-11-13:** 591 tests collected, 590 passing, 1 skipped (the
+symlink test, where Windows does not permit symlinks). `ruff check .` clean.
+The mutation harness runs 84 test × mutant pairs over 29 mutants with 0
+problems. The evaluation harness numbers are unchanged from the original
+ablation (§5.3), except that containment now has 12 tasks, all contained.
 Final-year capstone (CSE-AIDS, 2026–27).
 
 ---
@@ -167,7 +169,7 @@ can be read, summarised and spoken aloud, but it cannot cause an action.
 | `uaic/app/` | 730 | Session (composition root), run records, the backend thread. |
 | `uaic/surface.py` | — | The **only** module a UI may import (enforced by a test). |
 | `uaic/desktop/` | 1396 | PySide6 window, dialogs, offline speech in/out, spoken-form cleanup. |
-| `tests/` | 7365 | pytest, 562 tests. |
+| `tests/` | 7365 | pytest, 591 tests. |
 | `eval/` | — | Task corpus (data), harness, README. |
 | `scripts/` | — | Injection report, mutation harness, live checks, packaging, speech evaluation. |
 
@@ -320,21 +322,29 @@ reads. No attack has been run against the live model, which is the main caveat.
 
 ### 5.2 The mutation harness (`py scripts/mutation/run_mutants.py`)
 
-It defines 27 mutants, each removing one defence in the running test process,
+It defines 29 mutants, each removing one defence in the running test process,
 such as: path resolution before containment; scope; the GATE table; the tool
 freeze; the declared-tool check; the nonce; provenance of notes and results;
 truncation notices; confirmation binding; taint escalation and propagation;
-undo; cancellation safe points; progress isolation; and the bulk-move
-undo-record check.
+undo; cancellation safe points; progress isolation; the bulk-move
+undo-record and argument checks; argument types; and the journal's guards
+against REPLACE.
 
-The harness runs 73 test × mutant pairs. Every mapped defence test turns
-**red** when its defence is removed. Two pairs are expected to stay green:
-binding alone is removed while taint still stops the attack, which records two
-independent defences. **Result: 0 problems.** No defence test passes vacuously.
+The harness runs 84 test × mutant pairs. Every mapped defence test turns
+**red** when its defence is removed. Four pairs are expected to stay green,
+each recording two independent defences: binding alone is removed while taint
+still stops the attack (two pairs), and either bulk-restore check alone is
+removed while the other still refuses (two pairs). **Result: 0 problems.** No
+defence test passes vacuously.
+
+The harness also refuses to pass vacuously. It fails loudly (exit 2) if
+pytest cannot run, if any file collects nothing, or if the matrix maps a
+number of pairs other than the pinned `EXPECTED_PAIRS`. An earlier version
+printed "0 problem(s)" under an interpreter with no pytest, having run nothing.
 
 ### 5.3 The ablation (`py eval/harness.py`)
 
-Corpus: 32 benign, 11 containment, 6 recovery and 3 injection tasks, declared as
+Corpus: 32 benign, 12 containment, 6 recovery and 3 injection tasks, declared as
 **data** in `eval/corpus.json`, independent of the tests. Configurations:
 - `none`: no binding, no taint.
 - `binding`: confirmation binding only.
@@ -346,14 +356,14 @@ everything.
 
 | config | user | success | containment | interruption | recovery | **silent dispatch** |
 |---|---|---|---|---|---|---|
-| none | careful | 32/32 | 11/11 | 7/32 (0.22) | 6/6 | **2/3** |
-| none | rubber-stamp | 32/32 | 11/11 | 7/32 (0.22) | 6/6 | **2/3** |
-| binding | careful | 32/32 | 11/11 | 7/32 (0.22) | 6/6 | **1/3** |
-| binding | rubber-stamp | 32/32 | 11/11 | 7/32 (0.22) | 6/6 | **1/3** |
-| shipped | careful | 29/32 | 11/11 | 7/29 (0.24) | 6/6 | **0/3** |
-| shipped | rubber-stamp | 32/32 | 11/11 | 10/32 (0.31) | 6/6 | **0/3** |
-| results | careful | 30/32 | 11/11 | 7/30 (0.23) | 6/6 | **0/3** |
-| results | rubber-stamp | 32/32 | 11/11 | 9/32 (0.28) | 6/6 | **0/3** |
+| none | careful | 32/32 | 12/12 | 7/32 (0.22) | 6/6 | **2/3** |
+| none | rubber-stamp | 32/32 | 12/12 | 7/32 (0.22) | 6/6 | **2/3** |
+| binding | careful | 32/32 | 12/12 | 7/32 (0.22) | 6/6 | **1/3** |
+| binding | rubber-stamp | 32/32 | 12/12 | 7/32 (0.22) | 6/6 | **1/3** |
+| shipped | careful | 29/32 | 12/12 | 7/29 (0.24) | 6/6 | **0/3** |
+| shipped | rubber-stamp | 32/32 | 12/12 | 10/32 (0.31) | 6/6 | **0/3** |
+| results | careful | 30/32 | 12/12 | 7/30 (0.23) | 6/6 | **0/3** |
+| results | rubber-stamp | 32/32 | 12/12 | 9/32 (0.28) | 6/6 | **0/3** |
 
 These numbers were re-verified after every change listed in §6–§8 and did not
 move.
@@ -443,11 +453,20 @@ The fix was a new tool in the action space, not a change to the loop:
   - **Undo record:** each move writes a batch record of exactly what moved. Undo
     moves the files back and leaves the destination folder in place, even if the
     move created it.
-- **`fs.restore_batch`**, its inverse, treats that on-disk record as
-  **untrusted input**.
-  - **Validation:** every entry must leave from the record's destination folder
-    and return *directly* into the source folder the broker scoped, under the
-    same name. A tampered record is refused whole, before anything moves.
+- **`fs.restore_batch`**, its inverse, takes every path it will touch as an
+  argument: the folder the files return to, the folder they are in, and each
+  file's current and original path (`many: true` path lists). They live in
+  the append-only journal, and the broker scopes each one at undo time.
+  - **Validation:** the on-disk record is **untrusted input**, never a
+    parameter. It may only confirm the brokered moves; any difference refuses
+    the whole step with `FS.BATCH_RECORD_MISMATCH` before anything moves. The
+    plugin also checks that each brokered move runs between those two folders
+    under the same name.
+  - **History:** the first version scoped only the return folder and read the
+    rest from the record. A record whose `to_folder` and entry were rewritten
+    together pulled a file in from outside the grant. That was found in review,
+    fixed, and is pinned by tests, a mutant and the containment task
+    `contain_undo_batch_record_outside_grant`.
   - **One use:** records are consumed when undone and cannot be replayed.
   - **Mutation check:** a mutant (`RECORD_UNCHECKED`) proves the tests catch
     the check being removed.
@@ -569,11 +588,11 @@ safety claim is about one sample rather than the system.
 
 | Claim | Command | Output |
 |---|---|---|
-| 562 tests pass | `py -m pytest` | stdout |
+| 590 tests pass, 1 skipped | `py -m pytest` | stdout |
 | Lint clean | `py -m ruff check .` | stdout |
 | 39 injection rows, 2 got through | `py scripts/injection_report.py` | stdout table |
 | Ablation table (§5.3) | `py eval/harness.py` | stdout, plus `eval/out/results.{json,csv,tex}` (the `.tex` is paper-ready) |
-| 27 mutants, 0 problems | `py scripts/mutation/run_mutants.py` | stdout |
+| 84 pairs, 0 problems | `py scripts/mutation/run_mutants.py` | stdout |
 | Confirmation cost | `py scripts/confirmation_cost.py` | stdout |
 | Live planner works | `py scripts/live_check.py`, `py scripts/live_e2e.py` | stdout (needs key) |
 | Build is whole | `py scripts/build_desktop.py --with-model --verify` | self-test JSON |
@@ -677,11 +696,11 @@ This project's distinct angles are:
 
 ```
 .venv\Scripts\activate
-py -m pytest                             # 562 pass
+py -m pytest                             # 590 pass, 1 skip
 py -m ruff check .                       # clean
 py scripts/injection_report.py           # attack table
 py eval/harness.py                       # ablation (+ LaTeX in eval/out/)
-py scripts/mutation/run_mutants.py       # 0 problems
+py scripts/mutation/run_mutants.py       # 84 pair(s) run, 0 problem(s)
 py scripts/live_check.py                 # live planner (needs UAIC_GEMINI_API_KEY)
 py scripts/get_whisper_model.py          # one-time speech model download
 py scripts/speech_eval.py record --speaker NAME ; py scripts/speech_eval.py score

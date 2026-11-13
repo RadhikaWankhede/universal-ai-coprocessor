@@ -227,8 +227,8 @@ The app (PySide6) covers:
 - PyInstaller packaging.
 
 Bulk pattern moves and folder tools have exact undo, and the planner gets a
-planning guide. 562 tests pass, ruff is clean, and the mutation harness reports
-0 problems. The design, results and limitations are in
+planning guide. 590 tests pass (1 skipped), ruff is clean, and the mutation
+harness runs 84 pairs with 0 problems. The design, results and limitations are in
 [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md).
 
 The browser plugin is **not implemented**; its adversarial tests are prepared,
