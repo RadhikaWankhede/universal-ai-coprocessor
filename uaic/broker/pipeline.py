@@ -32,12 +32,25 @@ GATE: dict[tuple[Rev, Risk], Decision] = {
 
 
 ARG_TYPES: dict[str, type] = {"str": str, "email": str, "bool": bool, "int": int}
+PATH_TYPES = frozenset({"path"})     # checked by resolution and scope (stage 3), not here
 
 
 def _deny(rule_id: str, reason: str) -> Verdict:
     # An unclassifiable call is treated as the worst case, never the best.
     return Verdict(decision=Decision.DENY, risk=Risk.CRITICAL,
                    rev=Rev.IRREVERSIBLE, reasons=(reason,), rule_ids=(rule_id,))
+
+
+def _unknown_types(spec: ToolSpec) -> list[str]:
+    """Declared arguments whose type the broker has no check for.
+
+    The manifest loader rejects these, but a spec can reach the broker without
+    it (a widened ArgType, a hand-built spec). Such a tool is refused whole,
+    rather than letting the ARG_TYPES lookup below raise.
+    """
+    return [name for name, arg in spec.args.items()
+            if not (isinstance(arg.type, str)
+                    and (arg.type in PATH_TYPES or arg.type in ARG_TYPES))]
 
 
 def _wrong_types(spec: ToolSpec, args: dict) -> list[str]:
@@ -49,7 +62,7 @@ def _wrong_types(spec: ToolSpec, args: dict) -> list[str]:
     wrong = []
     for name, value in args.items():
         arg = spec.args[name]
-        if arg.type == "path" or (value is None and not arg.required):
+        if arg.type in PATH_TYPES or (value is None and not arg.required):
             continue
         accepted = isinstance(value, ARG_TYPES[arg.type])
         if arg.type == "int" and isinstance(value, bool):   # bool is a subclass of int
@@ -77,6 +90,12 @@ def decide(call: ToolCall, caps: CapabilitySet, *,
     if unexpected:
         return _deny("BRK.BAD_ARGS",
                      f"undeclared argument(s): {', '.join(sorted(unexpected))}")
+
+    unknown = _unknown_types(spec)
+    if unknown:
+        return _deny("BRK.UNKNOWN_ARG_TYPE",
+                     f"argument(s) of a type the broker cannot check: "
+                     f"{', '.join(sorted(unknown))}")
 
     wrong = _wrong_types(spec, call.args)
     if wrong:
