@@ -33,7 +33,7 @@ J = "tests/test_journal.py"
 
 # The number of test x mutant runs the matrix below produces. Asserted, not
 # trusted: a run that finds fewer (or more) pairs has not measured the matrix.
-EXPECTED_PAIRS = 83
+EXPECTED_PAIRS = 84
 
 # (file, substring of the test id) -> the mutants to run. Each must turn the
 # test RED, unless written "NAME=GREEN": that records an attack with two
@@ -95,6 +95,7 @@ MATRIX: list[tuple[str, str, tuple[str, ...]]] = [
     (F, "source_folder_must_be_inside", ("SCOPE_OFF",)),
     (F, "cannot_climb_above_the_grant", ("SCOPE_OFF",)),
     (F, "every_file_a_restore_names", ("SCOPE_OFF",)),
+    (F, "bulk_move_proposed_after_reading", ("TAINT_OFF",)),
     (U, "edited_batch_record_cannot_pull", ("RECORD_UNCHECKED",)),
     (U, "restore_naming_one_file_outside_the_grant", ("UNDO_UNBROKERED", "SCOPE_OFF")),
     (U, "outside_the_grant_is_refused", ("UNDO_UNBROKERED",)),

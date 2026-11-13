@@ -16,7 +16,8 @@ from pathlib import Path
 import pytest
 
 from uaic.broker import decide
-from uaic.contracts import Decision, ToolCall
+from uaic.broker.risk import known_predicates
+from uaic.contracts import Decision, Risk, ToolCall
 from uaic.core import PlanBuilder, SessionMemory
 from uaic.journal import ActionJournal, Status, UndoEngine
 from uaic.plugins import FileSystemPlugin
@@ -266,6 +267,40 @@ def test_a_bulk_move_inside_the_grant_is_allowed_without_a_prompt(ws):
     caps = _caps("fs.move_matching", src, dst.parent)
     verdict = decide(move_jpgs(src, dst), caps)
     assert verdict.decision is Decision.ALLOW
+
+
+def test_a_bulk_move_does_not_claim_a_risk_nothing_acts_on(ws):
+    """target_is_many_files raised a crowded folder to HIGH, which the GATE
+    allows for a reversible tool anyway: a label that looked like a control
+    and changed no verdict. It also counted the folder, not the matches."""
+    _, src, dst = ws
+    for i in range(60):
+        (src / f"IMG_{i:02d}.jpg").write_text("x", encoding="utf-8")
+    verdict = decide(move_jpgs(src, dst), _caps("fs.move_matching", src, dst.parent))
+    assert (verdict.decision, verdict.risk) == (Decision.ALLOW, Risk.LOW)
+    assert "target_is_many_files" not in known_predicates()
+
+
+def test_a_bulk_move_proposed_after_reading_is_asked(ws, tmp_path):
+    """The control a bulk move does rely on: proposed with untrusted content in
+    view and never shown to the user, it is escalated and asked about."""
+    _, src, dst = ws
+    caps = _caps("fs.move_matching", src, dst.parent)
+    approved = move_jpgs(src, dst)
+    injected = call("fs.move_matching", folder=str(src), pattern="*",
+                    destination=str(dst)).model_copy(
+        update={"tainted": True, "taint_sources": ("file:///notes.txt",)})
+    asked = []
+    executor = Executor(ActionJournal(tmp_path / "j.db"),
+                        {"fs": FileSystemPlugin(tmp_path / "trash").execute},
+                        confirm=lambda c, v: asked.append(v) or False)
+
+    outcome = executor.run_one(injected, caps, executor.ledger_for([approved]))
+
+    assert outcome.status == Status.DECLINED
+    assert [v.decision for v in asked] == [Decision.CONFIRM_PLAN]
+    assert "RT.TAINT_ESCALATION" in asked[0].rule_ids
+    assert (src / "notes.txt").exists(), "nothing moved"
 
 
 def restore(folder: Path, source: Path, moved: list[Path], originals: list[Path]) -> ToolCall:

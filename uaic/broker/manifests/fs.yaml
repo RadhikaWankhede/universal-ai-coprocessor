@@ -77,7 +77,9 @@ tools:
     risk: low
     rev: reversible          # undo moves back exactly the files that moved
     inverse: fs.restore_batch
-    escalate: [target_is_many_files]
+    # No escalation predicate. For a reversible tool the GATE changes its
+    # decision only at CRITICAL, and a bulk move is not critical: its controls
+    # are scope, taint escalation, confirmation binding and a brokered undo.
 
   - name: fs.restore_batch
     summary: Move the files of an earlier fs.move_matching back where they came from

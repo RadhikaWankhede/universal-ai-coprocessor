@@ -193,8 +193,7 @@ can be read, summarised and spoken aloud, but it cannot cause an action.
 Crossed with four risk levels, this gives a **12-cell GATE table** held as
 literal data in `broker/pipeline.py`, never as branching logic. Risk can be
 escalated by registered Python predicates named in the manifest, such as
-`target_is_directory` and `target_is_many_files`. These are never strings
-passed to `eval()`.
+`target_is_directory`. These are never strings passed to `eval()`.
 
 **Key result:** reversibility is a property of the implementation, not of the
 verb. A delete implemented as a move to trash is reversible and needs no

@@ -49,19 +49,6 @@ def _target_is_directory(args: dict[str, Any], targets: tuple[Path, ...]) -> Ris
     return Risk.HIGH if args.get("recursive") else Risk.MEDIUM
 
 
-@predicate("target_is_many_files")
-def _target_is_many_files(args: dict[str, Any], targets: tuple[Path, ...]) -> Risk | None:
-    """More than 50 files in one call is a bulk operation."""
-    for t in targets:
-        if t.is_dir():
-            try:
-                if sum(1 for _ in t.iterdir()) > 50:
-                    return Risk.HIGH
-            except OSError:
-                return Risk.HIGH
-    return None
-
-
 # ---------------------------------------------------------------- classify
 
 def classify(spec, args: dict[str, Any], targets: tuple[Path, ...]) -> tuple[Risk, Rev]:
